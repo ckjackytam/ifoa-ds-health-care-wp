@@ -1,0 +1,53 @@
+---
+title: IFoA DS in Health and Care Case Study on CMI Data
+author: "Michiel Luteijn"
+date: <span style="color:#005192">`r Sys.Date()`</span><br><br/>
+output: html_document
+---
+
+```{r package install, results=FALSE, message=FALSE, warning=FALSE, include = F}
+packages <- c("data.table", "dplyr", "ggplot2", "magrittr", "purrr", "knitr", "plyr")
+
+for (pkg in packages){
+  if(!pkg %in% rownames(installed.packages())){
+    install.packages(pkg)
+  } 
+}
+library("purrr")
+quietly(lapply(packages, library, character.only = T)) %>% suppressWarnings()
+
+rm(packages, pkg)
+quietly(gc())
+```
+
+
+```{r general parameters, echo = FALSE}
+# Some general settings for the .html.
+
+knitr::opts_chunk$set(
+  echo = FALSE, # code is not shown in document 
+  warning = FALSE, # excludes warning messages to be displayed
+  message = FALSE, # excludes messages to be displayed
+  # set figure size and position
+  fig.align = 'center',
+  fig.asp = 0.618,
+  fig.width = 8.6,
+  out.width='100%'
+)
+
+```
+
+```{r load CMI data}
+homedir <- here::here()
+
+# Directory for CMI data
+datadir <- paste0(homedir,"/Imports/Data/")
+# Directory for base rate tables
+tabledir <- paste0(homedir,"/Imports/Tables/")
+# Directory for trends
+trenddir <- paste0(homedir,"/Imports/Trend/")
+
+# Read in the CMI data for 2007-2019 - objective = expdata
+source(paste0(homedir, "/R/Helpers/Read CMI data.R"))
+```
+
