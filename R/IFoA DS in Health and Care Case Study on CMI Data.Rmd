@@ -2,11 +2,25 @@
 title: IFoA DS in Health and Care Case Study on CMI Data
 author: "Michiel Luteijn"
 date: <span style="color:#005192">`r Sys.Date()`</span><br><br/>
-output: html_document
+output: 
+  html_document:
+    toc: yes
+    toc_float: yes
+    toc_depth: 3
+    number_sections: true
+    code_folding: hide
+    df_print: paged
+    fig_caption: yes
 ---
 
+<style>
+  .plotly {
+    margin-bottom: 400px;
+  }
+</style>
+
 ```{r package install, results=FALSE, message=FALSE, warning=FALSE, include = F}
-packages <- c("data.table", "dplyr", "ggplot2", "magrittr", "purrr", "knitr", "plyr", "here", "plotly", "htmltools")
+packages <- c("data.table", "dplyr", "ggplot2", "magrittr", "purrr", "knitr", "plyr", "here", "plotly", "htmltools", "DT", "ggcorrplot", "Hmisc")
 
 for (pkg in packages){
   if(!pkg %in% rownames(installed.packages())){
@@ -19,7 +33,6 @@ quietly(lapply(packages, library, character.only = T)) %>% suppressWarnings()
 rm(packages, pkg)
 quietly(gc())
 ```
-
 
 ```{r general parameters, echo = FALSE}
 # Some general settings for the .html.
@@ -40,6 +53,7 @@ knitr::opts_chunk$set(
 # Load in data
 ```{r load CMI data}
 homedir <- here::here()
+set.seed(123)
 
 # Directory for CMI data
 datadir <- paste0(homedir,"/Imports/Data/")
@@ -52,22 +66,53 @@ trenddir <- paste0(homedir,"/Imports/Trend/")
 source(paste0(homedir, "/R/Helpers/Read CMI data.R"))
 ```
 
-# Data exploration {.tabset}
+# Data exploration
 
-## Univariate A/E plots {.tabset}
+## Correlation matrix
 ```{r predictors}
 predictors <- names(expdata[, c(1:9, 18)])
 ```
 
-```{r AtoE plots, echo=FALSE, results = 'asis'}
+```{r , echo=FALSE, results = 'asis'}
+formula <- as.formula(paste("incurredclaims ~", paste(predictors, collapse = " + ")))
+model_matrix <- model.matrix(formula, expdata)
+cor_matrix <- rcorr(model_matrix)
+corr <- cor_matrix$r
+
+corr[upper.tri(corr)] <- NA  # Remove upper triangle
+corr <- as.data.frame(as.table(corr)) %>% data.table
+corr <- corr[Var1 != Var2 & stats::complete.cases(Freq)]
+
+cormatrix <- ggplot(corr, aes(Var1, Var2, fill = Freq)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white",
+                       midpoint = 0, limit = c(-1, 1), space = "Lab",
+                       name="Correlation") +
+  ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, vjust = 1, hjust = 1), axis.title.x = ggplot2::element_blank(),
+                 axis.title.y = ggplot2::element_blank(), panel.grid.major = ggplot2::element_blank(), legend.justification = c(1, 0),
+                 legend.position.inside = c(0.6, 0.7)) +
+  ggplot2::geom_text(ggplot2::aes(Var1, Var2, label = round(Freq, 2)), color = 'black',size = 3) +
+  coord_fixed() +
+  ggtitle("Correlation Matrix")
+
+plotlyOut <- plotly::ggplotly(cormatrix)
+plotlyOut <- plotlyOut %>% layout(width = 1200, height = 900)
+plotlyOut
+```
+
+## Univariate A/E plots {.tabset}
+
+```{r , echo=FALSE, results = 'asis'}
 for (i in 1:length(predictors)){
   l <- htmltools::tagList()
-  l[[1]] <- list(cat(paste0('### ', predictors[i]), '\n'))
+  l[[1]] <- list(cat(paste0('### ', predictors[i]), ' \n'))
   plotData <- expdata[, list(
     actual_L = sum(incurredclaims),
     expected_L = sum(expectedclaims),
     actual_A = sum(amountincurred),
-    expected_A = sum(expectedamountclaims)
+    expected_A = sum(expectedamountclaims),
+    exposure_L = sum(livesexposure),
+    exposure_A = sum(amountsexposure)
   ), by = eval(predictors[i])]
   classPredictor <- class(expdata[, get(predictors[i])])
   if(classPredictor %in% c("numeric", "integer", "Date")){
@@ -78,15 +123,18 @@ for (i in 1:length(predictors)){
   } else{
     plotOut <- ggplot2::ggplot() +
       ggplot2::geom_point(data = plotData,
-                            mapping = ggplot2::aes(x = get(predictors[i]), y = actual_L/expected_L)) +
+                          mapping = ggplot2::aes(x = get(predictors[i]), y = actual_L/expected_L)) +
       ggplot2::xlab(paste0(predictors[i]))
   }
   plotlyOut <- plotly::ggplotly(plotOut)
   l[[2]] <- list(plotlyOut)
-  l[[3]] <- plotlyOut
+  l[[3]] <- list(DT::datatable(plotData))
   print(l)
 }
+
 ```
+
+
 
 
 
