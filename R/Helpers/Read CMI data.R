@@ -8,7 +8,7 @@ start <- Sys.time()
 invisible(rm(expdata))
 for(i in files){
   print(i)
-  data <- fread(paste0(datadir,i))
+  data <- fread(paste0(datadir,i), encoding = "Latin-1")
   names(data) <- gsub(" ", "", names(data)) %>% tolower
   if(exists("expdata") == TRUE){
     expdata <- rbind.fill(expdata, data) %>% data.table

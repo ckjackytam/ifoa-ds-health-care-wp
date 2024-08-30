@@ -6,7 +6,7 @@ output: html_document
 ---
 
 ```{r package install, results=FALSE, message=FALSE, warning=FALSE, include = F}
-packages <- c("data.table", "dplyr", "ggplot2", "magrittr", "purrr", "knitr", "plyr")
+packages <- c("data.table", "dplyr", "ggplot2", "magrittr", "purrr", "knitr", "plyr", "here", "plotly", "htmltools")
 
 for (pkg in packages){
   if(!pkg %in% rownames(installed.packages())){
@@ -37,6 +37,7 @@ knitr::opts_chunk$set(
 
 ```
 
+# Load in data
 ```{r load CMI data}
 homedir <- here::here()
 
@@ -50,4 +51,44 @@ trenddir <- paste0(homedir,"/Imports/Trend/")
 # Read in the CMI data for 2007-2019 - objective = expdata
 source(paste0(homedir, "/R/Helpers/Read CMI data.R"))
 ```
+
+# Data exploration {.tabset}
+
+## Univariate A/E plots {.tabset}
+```{r predictors}
+predictors <- names(expdata[, c(1:9, 18)])
+```
+
+```{r AtoE plots, echo=FALSE, results = 'asis'}
+for (i in 1:length(predictors)){
+  l <- htmltools::tagList()
+  l[[1]] <- list(cat(paste0('### ', predictors[i]), '\n'))
+  plotData <- expdata[, list(
+    actual_L = sum(incurredclaims),
+    expected_L = sum(expectedclaims),
+    actual_A = sum(amountincurred),
+    expected_A = sum(expectedamountclaims)
+  ), by = eval(predictors[i])]
+  classPredictor <- class(expdata[, get(predictors[i])])
+  if(classPredictor %in% c("numeric", "integer", "Date")){
+    plotOut <- ggplot2::ggplot() +
+      ggplot2::geom_line(data = plotData,
+                         mapping = ggplot2::aes(x = get(predictors[i]), y = actual_L/expected_L), lwd = 2) +
+      ggplot2::xlab(paste0(predictors[i]))
+  } else{
+    plotOut <- ggplot2::ggplot() +
+      ggplot2::geom_point(data = plotData,
+                            mapping = ggplot2::aes(x = get(predictors[i]), y = actual_L/expected_L)) +
+      ggplot2::xlab(paste0(predictors[i]))
+  }
+  plotlyOut <- plotly::ggplotly(plotOut)
+  l[[2]] <- list(plotlyOut)
+  l[[3]] <- plotlyOut
+  print(l)
+}
+```
+
+
+
+
 
