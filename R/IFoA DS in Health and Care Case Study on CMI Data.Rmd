@@ -78,16 +78,22 @@ expdata[, ':=' (
 # Data exploration
 
 
-## Correlation matrix
+## Correlation matrix {.tabset}
 ```{r predictors}
 predictors <- names(expdata[, c(1:9, 18)])
 ```
 
+### Plot
 ```{r , echo=FALSE, results = 'asis'}
+cormatdata <- data.table::copy(expdata)
+cormatdata[, c("sumassuredband") := as.numeric(sumassuredband)]
+
 formula <- as.formula(paste("incurredclaims ~", paste(predictors, collapse = " + ")))
-model_matrix <- model.matrix(formula, expdata)
+model_matrix <- model.matrix(formula, cormatdata)
 cor_matrix <- rcorr(model_matrix)
-corr <- cor_matrix$r
+
+corr <- stats::cov.wt(model_matrix, 
+                      wt = cormatdata$livesexposure, cor = TRUE) %>% .[["cor"]]
 
 corr[upper.tri(corr)] <- NA  # Remove upper triangle
 corr <- as.data.frame(as.table(corr)) %>% data.table
@@ -108,6 +114,14 @@ cormatrix <- ggplot(corr, aes(Var1, Var2, fill = Freq)) +
 plotlyOut <- plotly::ggplotly(cormatrix)
 plotlyOut <- plotlyOut %>% layout(width = 1200, height = 900)
 plotlyOut
+```
+
+### Table
+```{r , echo=FALSE, results = 'asis'}
+names(corr) <- c("Field1", "Field2", "Correlation")
+corr <- corr[order(-abs(Correlation))]
+corr[, c("Correlation") := round(Correlation, 2)]
+DT::datatable(corr)
 ```
 
 ## Univariate A/E plots {.tabset}
