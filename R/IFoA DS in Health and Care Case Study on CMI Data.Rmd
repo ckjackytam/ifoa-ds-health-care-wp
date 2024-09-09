@@ -66,7 +66,17 @@ trenddir <- paste0(homedir,"/Imports/Trend/")
 source(paste0(homedir, "/R/Helpers/Read CMI data.R"))
 ```
 
+```{r format data}
+expdata[, ':=' (
+  commencementyear = as.integer(commencementyear),
+  duration = as.integer(duration),
+  year = as.integer(year),
+  sumassuredband = factor(sumassuredband, levels = c("£0-£25000", "£25001-£75000", "£75001-£125000", "£125001-£250000", "£250001+"), ordered = TRUE)
+  )]
+```
+
 # Data exploration
+
 
 ## Correlation matrix
 ```{r predictors}
@@ -114,7 +124,7 @@ for (i in 1:length(predictors)){
     exposure_L = sum(livesexposure),
     exposure_A = sum(amountsexposure)
   ), by = eval(predictors[i])]
-  classPredictor <- class(expdata[, get(predictors[i])])
+  classPredictor <- class(expdata[, get(predictors[i])])[1]
   if(classPredictor %in% c("numeric", "integer", "Date")){
     plotOut <- ggplot2::ggplot() +
       ggplot2::geom_line(data = plotData,
