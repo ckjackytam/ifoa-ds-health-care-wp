@@ -151,12 +151,12 @@ for (i in 1:length(predictors)){
   l <- htmltools::tagList()
   l[[1]] <- list(cat(paste0('### ', predictors[i]), ' \n'))
   plotData <- expdata[, list(
-    actual_L = sum(incurredclaims),
-    expected_L = sum(expectedclaims),
-    actual_A = sum(amountincurred),
-    expected_A = sum(expectedamountclaims),
-    exposure_L = sum(livesexposure),
-    exposure_A = sum(amountsexposure)
+    actual_L = sum(incurredclaims) %>% round(2),
+    expected_L = sum(expectedclaims) %>% round(2),
+    actual_A = sum(amountincurred) %>% round(2),
+    expected_A = sum(expectedamountclaims) %>% round(2),
+    exposure_L = sum(livesexposure) %>% round(2),
+    exposure_A = sum(amountsexposure) %>% round(2)
   ), by = eval(predictors[i])]
   classPredictor <- class(expdata[, get(predictors[i])])[1]
   if(classPredictor %in% c("numeric", "integer", "Date")){
@@ -178,7 +178,6 @@ for (i in 1:length(predictors)){
   l[[3]] <- list(DT::datatable(plotData))
   print(l)
 }
-
 ```
 
 
