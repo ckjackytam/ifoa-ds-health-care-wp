@@ -79,11 +79,19 @@ expdata[, ':=' (
 
 
 ## Correlation matrix {.tabset}
+- Weighted by lives exposure
 ```{r predictors}
 predictors <- names(expdata[, c(1:9, 18)])
 ```
 
 ### Plot
+- It was observed that 
+-- age is negatively correlated with sum assured band
+-- Single lives are positively correlated with level policies and commencement year
+-- Smoker status S is negatively correlated with sum assured band
+-- Distribution channel S is negatively correlated with commencement year and positively correlated with duration 
+-- Distribution channel U is positively correlated with product type Other and commencement year
+
 ```{r , echo=FALSE, results = 'asis'}
 cormatdata <- data.table::copy(expdata)
 cormatdata[, c("sumassuredband") := as.numeric(sumassuredband)]
@@ -99,7 +107,18 @@ corr[upper.tri(corr)] <- NA  # Remove upper triangle
 corr <- as.data.frame(as.table(corr)) %>% data.table
 corr <- corr[Var1 != Var2 & stats::complete.cases(Freq) & Var1 != "(Intercept)" & Var2 != "(Intercept)"]
 
-cormatrix <- ggplot(corr, aes(Var1, Var2, fill = Freq)) +
+# Extract comparisons within one-hot encoded field
+extract_base_column <- function(text_string, base_columns = names(expdata)) {
+  base_columns[sapply(base_columns, function(base) grepl(base, text_string))]
+  }
+field1_base_columns <- sapply(corr$Var1, extract_base_column)
+field2_base_columns <- sapply(corr$Var2, extract_base_column)
+
+base_comparison <- sapply(1:length(field1_base_columns), function(i) {
+  identical(field1_base_columns[[i]], field2_base_columns[[i]])
+})
+
+cormatrix <- ggplot(corr[!base_comparison], aes(Var1, Var2, fill = Freq)) +
   geom_tile(color = "white") +
   scale_fill_gradient2(low = "blue", high = "red", mid = "white",
                        midpoint = 0, limit = c(-1, 1), space = "Lab",
@@ -121,7 +140,8 @@ plotlyOut
 names(corr) <- c("Field1", "Field2", "Correlation")
 corr <- corr[order(-abs(Correlation))]
 corr[, c("Correlation") := round(Correlation, 2)]
-DT::datatable(corr)
+
+DT::datatable(corr[!base_comparison])
 ```
 
 ## Univariate A/E plots {.tabset}
