@@ -85,11 +85,11 @@ predictors <- names(expdata[, c(1:9, 18)])
 ```
 
 ### Plot
-- It was observed that 
--- age is negatively correlated with sum assured band
--- Single lives are positively correlated with level policies and commencement year
--- Smoker status S is negatively correlated with sum assured band
--- Distribution channel S is negatively correlated with commencement year and positively correlated with duration 
+- It was observed that <br>
+-- age is negatively correlated with sum assured band <br>
+-- Single lives are positively correlated with level policies and commencement year <br>
+-- Smoker status S is negatively correlated with sum assured band <br>
+-- Distribution channel S is negatively correlated with commencement year and positively correlated with duration  <br>
 -- Distribution channel U is positively correlated with product type Other and commencement year
 
 ```{r , echo=FALSE, results = 'asis'}
