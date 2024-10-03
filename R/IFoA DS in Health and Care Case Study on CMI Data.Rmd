@@ -162,14 +162,17 @@ for (i in 1:length(predictors)){
   if(classPredictor %in% c("numeric", "integer", "Date")){
     plotOut <- ggplot2::ggplot() +
       ggplot2::geom_line(data = plotData,
-                         mapping = ggplot2::aes(x = get(predictors[i]), y = actual_L/expected_L), lwd = 2) +
-      ggplot2::xlab(paste0(predictors[i]))
+                         mapping = ggplot2::aes(x = get(predictors[i]), y = actual_L/expected_L), lwd = 2) 
+    
   } else{
     plotOut <- ggplot2::ggplot() +
       ggplot2::geom_point(data = plotData,
-                          mapping = ggplot2::aes(x = get(predictors[i]), y = actual_L/expected_L)) +
-      ggplot2::xlab(paste0(predictors[i]))
+                          mapping = ggplot2::aes(x = get(predictors[i]), y = actual_L/expected_L))
   }
+  plotOut <- plotOut +
+    ggplot2::xlab(paste0(predictors[i])) +
+    ggplot2::scale_y_continuous(limits = c(min(plotData$actual_L / plotData$expected_L, 1), max(plotData$actual_L / plotData$expected_L, 1))) +
+    ggplot2::geom_hline(yintercept = 1, linetype = "dashed", color = "red")
   plotlyOut <- plotly::ggplotly(plotOut)
   l[[2]] <- list(plotlyOut)
   l[[3]] <- list(DT::datatable(plotData))
