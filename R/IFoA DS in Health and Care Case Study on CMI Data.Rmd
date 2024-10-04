@@ -80,13 +80,20 @@ expdata[, ':=' (
 
 ## Correlation matrix {.tabset}
 - Weighted by lives exposure
+
+- The correlation matrix will provide information on correlated variables. This is useful for:  <br>
+-- Providing a deeper understanding of the dataset. For example, a change in business mix over time. <br>
+-- Support like-for-like comparisons. For example, when comparing smokers to non-smokers, the correlation matrix below identifies the fact that smokers tend to have smaller policis than non-smokers. Therefore, to compare apples to apples, the comparison should be adjusted for differences in sum assured band between smokers and non-smokers. <br>
+-- Identification of potentially redundant variables. Very strongly correlated variables may be capturing the same characteristics.  <br>
+--- Avoiding strongly correlated predictor variables can also prevent issues with multicollinearity. <br>
+-- Identify potential data errors. A strong, unexpected, correlation could be because of data entry errors / data missing not at random. For example, rated lives not being reported for certain sales channels would result in an unexpected and strong correlation between rated lives and sales channel.
 ```{r predictors}
 predictors <- names(expdata[, c(1:9, 18)])
 ```
 
 ### Plot
 - It was observed that <br>
--- age is negatively correlated with sum assured band <br>
+-- Age is negatively correlated with sum assured band <br>
 -- Single lives are positively correlated with level policies and commencement year <br>
 -- Smoker status S is negatively correlated with sum assured band <br>
 -- Distribution channel S is negatively correlated with commencement year and positively correlated with duration  <br>
