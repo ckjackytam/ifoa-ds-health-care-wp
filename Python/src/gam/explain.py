@@ -114,7 +114,7 @@ def factor_strength(
         all_var_list = list(set(var1_list + var2_list))
         assert all(
             v in all_keys for v in all_var_list
-        ), "Some variables in interaction terms are used as single factors."
+        ), "Some variables in interaction terms are not used as single factors."
 
         # Initialise empty lists
         inter_term_list = []
