@@ -1,6 +1,8 @@
 import numpy as np
 import pandas as pd
 import random
+import math
+
 
 def total_poisson_dev(y, y_pred):
     y = np.array(y)
@@ -21,7 +23,7 @@ def compile_data(
     seed_holdout=777,
     seed_cv=55,
     training_prop=0.8,
-    num_fold=5, 
+    num_fold=5,
 ):
     """
     Compile and preprocess data from multiple Excel files into a single DataFrame.
@@ -102,12 +104,12 @@ def compile_data(
     index_train = random_numbers[:train_size]
     index_test = random_numbers[train_size:]
 
-    # Assertion to check the training and holdout indices 
+    # Assertion to check the training and holdout indices
     assert len(index_train) + len(index_test) == len(
         df_data
     ), f"Sum of lengths of training and holdout data is not equal to the total number of rows in the original data."
 
-    # Define a holdout flag 
+    # Define a holdout flag
     df_data[holdout] = np.where(df_data[unique_id].isin(index_train), 0, 1)
 
     # Define a column for random folds for cross validations
@@ -116,4 +118,126 @@ def compile_data(
     df_data[fold] = np.where(df_data[holdout] == 0, df_data[fold], num_fold + 1)
 
     return df_data
+
+
+def round_down_to_power_of_10(x):
+    power = math.floor(math.log10(abs(x)))
+    return 10**power
+
+
+def _round_to_multiple(x, a, round_func):
+    return round_func(x / a) * a
+
+
+def double_lift_plot(
+    data, predict, target, exposure, n_bin=None, n_dec=None, endpoint_quantile=0.05
+):
+    """
+    Generate a double lift plot table for comparing two predictive models.
+
+    This function creates a table that can be used to visualize the performance
+    of two predictive models relative to each other and to the actual target values.
+    It bins the data based on the ratio of the two model predictions and calculates
+    average values within each bin.
+
+    Parameters:
+    -----------
+    data : pandas.DataFrame
+        The input data containing predictor columns, target column, and exposure column.
+    predict : list of str
+        Names of two columns in 'data' containing the predictions from two models.
+    target : str
+        Name of the column in 'data' containing the actual target values.
+    exposure : str
+        Name of the column in 'data' containing the exposure values.
+    n_bin : int, optional
+        Number of bins to use. If None, bins are determined automatically based on data range.
+    n_dec : int, optional
+        Number of decimal places to round the bin edges. If None, no rounding is performed.
+    endpoint_quantile : float or tuple of float, optional
+        Quantile(s) to use for determining the endpoint of the ratio range.
+        If a single float, it's used as the lower quantile and (1 - value) as the upper quantile.
+        If a tuple, the two values are used as lower and upper quantiles respectively.
+        Default is 0.05, which uses the 5th and 95th percentiles.
+
+    Returns:
+    --------
+    pandas.DataFrame
+        A table with the following columns:
+        - 'band': The bin number
+        - 'ratio_band': The interval of ratios for each bin
+        - Columns for the target and each predictor, containing average values per bin
+        - 'exposure': Total exposure in each bin
+
+    Notes:
+    ------
+    - The function applies a base multiplier to align the predictions with the overall target rate.
+    - Bin widths are determined adaptively based on the range of the ratio between the two predictors.
+    - The resulting table can be used to create a double lift plot, showing how the two models
+      perform relative to each other and to the actual target values across different ratio bands.
+    """
+    T = data[[*predict, target, exposure]].copy()
+
+    # Apply base multiplier to the predictions
+    o_cf = T[target].sum() / T[exposure].sum()
+    for p in predict:
+        T[p] *= o_cf / (T[p].sum() / T[exposure].sum())
+
+    T["ratio"] = T[predict[0]] / T[predict[1]]
+
+    if isinstance(endpoint_quantile, (list, tuple)):
+        lq, rq = endpoint_quantile[:2]
+    else:
+        lq, rq = endpoint_quantile, 1 - endpoint_quantile
+
+    pcl, pcr = T.ratio.quantile([lq, rq])
+
+    # Simplified bin_width calculation
+    pc_range = pcr - pcl
+    bin_width = next(
+        w
+        for r, w in [
+            (0.08, pc_range / 8),
+            (0.16, 0.01),
+            (0.4, 0.02),
+            (1, 0.05),
+            (2, 0.1),
+            (5, 0.2),
+            (float("inf"), 0.5),
+        ]
+        if pc_range < r
+    )
+
+    pcl_ = _round_to_multiple(pcl, bin_width, math.ceil)
+    pcr_ = _round_to_multiple(pcr, bin_width, math.floor)
+
+    if n_bin is None:
+        k = np.arange(pcl_, pcr_ + bin_width, bin_width)
+    else:
+        k = np.linspace(pcl_, pcr_, n_bin)
+
+    k[0], k[-1] = min(T.ratio.min(), k[0]), max(T.ratio.max(), k[-1])
+
+    if n_dec is not None:
+        k = np.round(k, n_dec)
+
+    T["ratio_band"] = pd.cut(T.ratio, bins=k, include_lowest=True)
+
+    output_table = (
+        T.groupby("ratio_band")
+        .agg(
+            {
+                **{col: "sum" for col in [target, *predict, exposure]},
+            }
+        )
+        .reset_index()
+    )
+
+    for col in [target, *predict]:
+        output_table[col] /= output_table[exposure]
+
+    output_table["band"] = range(1, len(output_table) + 1)
+    output_table.set_index("band", inplace=True)
+
+    return output_table
 
