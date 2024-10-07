@@ -54,6 +54,8 @@ knitr::opts_chunk$set(
 ```{r load CMI data}
 homedir <- here::here()
 set.seed(123)
+conf.level = 0.95 # For A/E visuals
+alpha <- 1 - conf.level
 
 # Directory for CMI data
 datadir <- paste0(homedir,"/Imports/Data/")
@@ -165,20 +167,33 @@ for (i in 1:length(predictors)){
     exposure_L = sum(livesexposure) %>% round(2),
     exposure_A = sum(amountsexposure) %>% round(2)
   ), by = eval(predictors[i])]
+  plotData[, ':=' (
+    AE = actual_L/expected_L,
+    AE_L = qpois(alpha / 2, actual_L)/expected_L,
+    AE_U = qpois(1 - alpha / 2, actual_L)/expected_L
+  )]
+  
   classPredictor <- class(expdata[, get(predictors[i])])[1]
   if(classPredictor %in% c("numeric", "integer", "Date")){
     plotOut <- ggplot2::ggplot() +
       ggplot2::geom_line(data = plotData,
-                         mapping = ggplot2::aes(x = get(predictors[i]), y = actual_L/expected_L), lwd = 2) 
-    
+                         mapping = ggplot2::aes(x = get(predictors[i]), y = AE), lwd = 2) +
+      ggplot2::geom_ribbon(data = plotData,
+                       mapping = ggplot2::aes(x = get(predictors[i]), 
+                                              ymin = AE_L, ymax = AE_U), 
+                       fill = "lightblue", alpha = 0.3)
   } else{
     plotOut <- ggplot2::ggplot() +
       ggplot2::geom_point(data = plotData,
-                          mapping = ggplot2::aes(x = get(predictors[i]), y = actual_L/expected_L))
+                          mapping = ggplot2::aes(x = get(predictors[i]), y = AE)) +
+      ggplot2::geom_errorbar(data = plotData,
+                         mapping = ggplot2::aes(x = get(predictors[i]), 
+                                                ymin = AE_L, ymax = AE_U), 
+                         width = 0.2, color = "black")
   }
   plotOut <- plotOut +
     ggplot2::xlab(paste0(predictors[i])) +
-    ggplot2::scale_y_continuous(limits = c(min(plotData$actual_L / plotData$expected_L, 1), max(plotData$actual_L / plotData$expected_L, 1))) +
+    ggplot2::scale_y_continuous(limits = c(min(plotData$AE_L, 1), max(plotData$AE_U, 1))) +
     ggplot2::geom_hline(yintercept = 1, linetype = "dashed", color = "red")
   plotlyOut <- plotly::ggplotly(plotOut)
   l[[2]] <- list(plotlyOut)
