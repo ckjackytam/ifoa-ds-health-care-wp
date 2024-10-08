@@ -115,6 +115,7 @@ corr <- stats::cov.wt(model_matrix,
 corr[upper.tri(corr)] <- NA  # Remove upper triangle
 corr <- as.data.frame(as.table(corr)) %>% data.table
 corr <- corr[Var1 != Var2 & stats::complete.cases(Freq) & Var1 != "(Intercept)" & Var2 != "(Intercept)"]
+corr <- corr[order(-abs(Freq))]
 
 # Extract comparisons within one-hot encoded field
 extract_base_column <- function(text_string, base_columns = names(expdata)) {
@@ -147,7 +148,6 @@ plotlyOut
 ### Table
 ```{r , echo=FALSE, results = 'asis'}
 names(corr) <- c("Field1", "Field2", "Correlation")
-corr <- corr[order(-abs(Correlation))]
 corr[, c("Correlation") := round(Correlation, 2)]
 
 DT::datatable(corr[!base_comparison])
