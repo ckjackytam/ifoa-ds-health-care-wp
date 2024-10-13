@@ -581,5 +581,3 @@ def actual_vs_predicted(
     else:
         return df_groupby
 
-    return output_table
-
