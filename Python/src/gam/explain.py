@@ -211,31 +211,6 @@ class RatingFactorTrend:
         self.inter_rel_dict = inter_rel_dict
         self.weight = weight
 
-    @staticmethod
-    def _select_ticks(x_index, x_label):
-        """
-        Select appropriate tick marks for x-axis based on the number of data points.
-
-        Args:
-            x_index (list): List of x-axis index values.
-            x_label (list): List of x-axis label values.
-
-        Returns:
-            tuple: Selected x_index and x_label values for ticks.
-        """
-        n = len(x_index)
-        if n <= 10:
-            step = 1
-        elif n <= 30:
-            step = 3
-        elif n <= 50:
-            step = 5
-        elif n <= 100:
-            step = 7
-        else:
-            step = 20
-        return x_index[::step], x_label[::step]
-
     def _num_var_trend(
         self,
         var,
@@ -268,7 +243,7 @@ class RatingFactorTrend:
         banding.set_index("index", inplace=True)
 
         df_groupby = relativity_df.join(banding["Level"])
-        x_index, x_label = self._select_ticks(
+        x_index, x_label = select_ticks(
             df_groupby.index.tolist(), df_groupby["Level"].tolist()
         )
 
