@@ -420,3 +420,148 @@ class RatingFactorTrend:
                 label_fontsize=label_fontsize,
                 title_fontsize=title_fontsize,
             )
+
+
+class FactorImpCV:
+    """
+    A class for calculating feature importance using cross-validation with Generalized Additive Models (GAM).
+
+    This class implements a method to compute feature importance scores based on the change in Poisson deviance
+    when each feature is "neutralized" (set to its mean or mode). It uses k-fold cross-validation to ensure
+    robust estimates.
+
+    Attributes are initialized in the __init__ method.
+
+    Methods:
+        fit(i): Fits a GAM model for a specific fold.
+        baseline(i, gam_model): Calculates the baseline Poisson deviance for a specific fold.
+        __call__(): Computes feature importance scores across all folds.
+
+    Note:
+        This class assumes that the necessary libraries (pandas, numpy, and a GAM implementation) 
+        are imported and that a `total_poisson_dev` function is available for calculating 
+        Poisson deviance.
+    """
+
+    def __init__(
+        self,
+        term_string,
+        num_folds,
+        X_train_dict,
+        X_valid_dict,
+        y_train_dict,
+        y_valid_dict,
+        w_train_dict,
+        w_valid_dict,
+        n_splines,
+        lam_num,
+        lam_cat, 
+    ):
+        """
+        Initialize the FactorImpCV object.
+
+        Args:
+            term_string (str): A string representation of the GAM formula.
+            num_folds (int): The number of cross-validation folds.
+            X_train_dict (dict): Dictionary of training feature datasets for each fold.
+            X_valid_dict (dict): Dictionary of validation feature datasets for each fold.
+            y_train_dict (dict): Dictionary of training target variables for each fold.
+            y_valid_dict (dict): Dictionary of validation target variables for each fold.
+            w_train_dict (dict): Dictionary of training sample weights for each fold.
+            w_valid_dict (dict): Dictionary of validation sample weights for each fold.
+            n_splines (int): Number of splines to use in the GAM.
+            lam_num (float): Smoothing parameter for numerical features.
+            lam_cat (float): L2 regularisation parameter for categorical features.
+        """
+        self.term_string = term_string
+        self.num_folds = num_folds
+        self.X_train_dict = X_train_dict
+        self.X_valid_dict = X_valid_dict
+        self.y_train_dict = y_train_dict
+        self.y_valid_dict = y_valid_dict
+        self.w_train_dict = w_train_dict
+        self.w_valid_dict = w_valid_dict
+        self.n_splines = n_splines
+        self.lam_num = lam_num 
+        self.lam_cat = lam_cat
+
+    def fit(self, i):
+        """
+        Fit a GAM model for a specific fold.
+
+        Args:
+            i (int): The index of the current fold.
+
+        Returns:
+            object: A fitted GAM model.
+        """
+        n_splines = self.n_splines
+        lam_num = self.lam_num
+        lam_cat = self.lam_cat
+        gam_model = GAM(eval(self.term_string), distribution="poisson", link="log").fit(
+            self.X_train_dict[i], self.y_train_dict[i], self.w_train_dict[i]
+        )
+        return gam_model
+
+    def baseline(self, i, gam_model):
+        """
+        Calculate the baseline Poisson deviance for a specific fold.
+
+        Args:
+            i (int): The index of the current fold.
+            gam_model (object): A fitted GAM model for the current fold.
+
+        Returns:
+            float: The calculated Poisson deviance.
+        """
+        ypred_df = pd.DataFrame(index=self.X_valid_dict[i].index)
+        ypred_df["ypred_0"] = gam_model.predict(self.X_valid_dict[i])
+        ypred_df["weight"] = self.w_valid_dict[i]
+        ypred_df["ypred"] = ypred_df["ypred_0"] * ypred_df["weight"]
+        ypred_df["target"] = self.y_valid_dict[i]
+        return total_poisson_dev(ypred_df["target"], ypred_df["ypred"])
+
+    def __call__(self):
+        """
+        Compute feature importance scores across all folds.
+
+        This method fits GAM models for each fold, calculates the baseline deviance,
+        and then computes the change in deviance when each feature is "neutralized".
+        The change in deviance is used as the measure of feature importance.
+
+        Returns:
+            pandas.DataFrame: A DataFrame containing feature names and their importance scores,
+                              sorted in descending order of importance.
+        """
+        self.gam_list = [self.fit(i) for i in range(self.num_folds)]
+        self.baseline = np.sum(
+            [self.baseline(i, self.gam_list[i]) for i in range(self.num_folds)]
+        )
+        var_list = list(self.X_train_dict[0].columns)
+        fact_imp_list = []
+
+        for var in var_list:
+            ypred_dummy = {}
+            for i in range(self.num_folds):
+                ypred_dummy[i] = pd.DataFrame(index=self.X_valid_dict[i].index)
+                X = self.X_valid_dict[i].copy()
+                if var.endswith("_cat_level"):
+                    X[var] = X[var].mode()[0]
+                else:
+                    X[var] = X[var].mean()
+                ypred_dummy[i]["ypred_0"] = self.gam_list[i].predict(X)
+                ypred_dummy[i]["weight"] = self.w_valid_dict[i]
+                ypred_dummy[i]["ypred"] = (
+                    ypred_dummy[i]["ypred_0"] * ypred_dummy[i]["weight"]
+                )
+                ypred_dummy[i]["target"] = self.y_valid_dict[i]
+            ypred_combined = pd.concat(ypred_dummy.values(), axis=0)
+            dev = total_poisson_dev(
+                ypred_combined["target"], ypred_combined["ypred"]
+            )
+            fact_imp_list.append(dev - self.baseline)
+        output = pd.DataFrame(
+            zip(var_list, fact_imp_list), columns=["feature", "fact_imp"]
+        ).sort_values("fact_imp", ignore_index=True, ascending=False)
+
+        return output
