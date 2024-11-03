@@ -518,7 +518,7 @@ class FactorImpCV:
         ypred_df["ypred_0"] = gam_model.predict(self.X_valid_dict[i])
         ypred_df["weight"] = self.w_valid_dict[i]
         ypred_df["ypred"] = ypred_df["ypred_0"] * ypred_df["weight"]
-        ypred_df["target"] = self.y_valid_dict[i]
+        ypred_df["target"] = self.y_valid_dict[i] * ypred_df["weight"]
         return total_poisson_dev(ypred_df["target"], ypred_df["ypred"])
 
     def __call__(self):
@@ -554,7 +554,7 @@ class FactorImpCV:
                 ypred_dummy[i]["ypred"] = (
                     ypred_dummy[i]["ypred_0"] * ypred_dummy[i]["weight"]
                 )
-                ypred_dummy[i]["target"] = self.y_valid_dict[i]
+                ypred_dummy[i]["target"] = self.y_valid_dict[i] * ypred_dummy[i]["weight"]
             ypred_combined = pd.concat(ypred_dummy.values(), axis=0)
             dev = total_poisson_dev(
                 ypred_combined["target"], ypred_combined["ypred"]
