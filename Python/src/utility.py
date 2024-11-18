@@ -572,7 +572,7 @@ def actual_vs_predicted(
         )
 
         ax.set_title(
-            var.replace("_level", "").replace("_cat_level", ""),
+            var.replace("_cat_level", "").replace("_level", ""),
             fontsize=title_fontsize,
         )
         ax.set_zorder(2)
