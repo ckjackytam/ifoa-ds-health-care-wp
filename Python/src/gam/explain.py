@@ -4,7 +4,10 @@ import re
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mtick
 import seaborn as sns
-from src.utility import *
+from ..utility import *
+from pygam import GAM, s, te, f, l, utils
+
+from . import *
 
 
 def _fs(relativity, weight):
@@ -138,7 +141,7 @@ def factor_strength(
                 "numerical" if var1 in num_rel_dict.keys() else "categorical"
             )
             feature2_type.append(
-                "numerical" if var2 in num_rel_dict.values() else "categorical"
+                "numerical" if var2 in num_rel_dict.keys() else "categorical"
             )
             relativity_df = rel.set_index([var1, var2])
             fs_value = _fs(relativity_df["relativity"], relativity_df[weight])
@@ -174,7 +177,7 @@ class RatingFactorTrend:
     """
     A class for analyzing and visualizing rating factor trends in the GAM model.
 
-    This class provides functionality to plot trends of numerical and categorical rating factors,
+    This class provides functionality to plot trends of numerical and categorical rating factors as well as interaction terms,
     showing their relativity and weight distribution. It supports both linear and logarithmic scales
     for numerical factors and can handle interaction effects between factors.
 
@@ -192,6 +195,9 @@ class RatingFactorTrend:
         categorical_banding,
         inter_rel_dict=None,
         weight="weight",
+        tick_fontsize=14, 
+        label_fontsize=18, 
+        title_fontsize=22,
     ):
         """
         Initialize the RatingFactorTrend object.
@@ -206,19 +212,38 @@ class RatingFactorTrend:
         """
         self.num_rel_dict = num_rel_dict
         self.cat_rel_dict = cat_rel_dict
+        self.inter_rel_dict = inter_rel_dict
         self.numerical_banding = numerical_banding
         self.categorical_banding = categorical_banding
         self.inter_rel_dict = inter_rel_dict
         self.weight = weight
+        self.tick_fontsize = tick_fontsize
+        self.label_fontsize = label_fontsize
+        self.title_fontsize = title_fontsize
 
+    
+    def set_fontsizes(self, tick_fontsize=None, label_fontsize=None, title_fontsize=None):
+        """
+        Update font sizes for plot elements.
+
+        Args:
+            tick_fontsize (int, optional): New font size for tick labels.
+            label_fontsize (int, optional): New font size for axis labels.
+            title_fontsize (int, optional): New font size for plot titles.
+        """
+        if tick_fontsize is not None:
+            self.tick_fontsize = tick_fontsize
+        if label_fontsize is not None:
+            self.label_fontsize = label_fontsize
+        if title_fontsize is not None:
+            self.title_fontsize = title_fontsize
+
+            
     def _num_var_trend(
         self,
         var,
         ax,
         log_scale,
-        tick_fontsize=14,
-        label_fontsize=18,
-        title_fontsize=22,
     ):
         """
         Internal method to plot trend for a numerical variable.
@@ -227,9 +252,6 @@ class RatingFactorTrend:
             var (str): Name of the numerical variable to plot.
             ax (matplotlib.axes.Axes): Matplotlib axes object to plot on.
             log_scale (bool): Whether to use logarithmic scale for relativity.
-            tick_fontsize (int): Font size for tick labels.
-            label_fontsize (int): Font size for axis labels.
-            title_fontsize (int): Font size for plot title.
         """
         relativity_df = self.num_rel_dict[var].set_index(var)
         leftylabel = "Relativity (Log-Scale)" if log_scale else "Relativity"
@@ -248,9 +270,9 @@ class RatingFactorTrend:
         )
 
         ax.xaxis.set_major_locator(mtick.FixedLocator(x_index))
-        ax.set_xticklabels(x_label, fontsize=tick_fontsize)
+        ax.set_xticklabels(x_label, fontsize=self.tick_fontsize)
         ax.set_xlabel("")
-        ax.set_ylabel(leftylabel, fontsize=label_fontsize)
+        ax.set_ylabel(leftylabel, fontsize=self.label_fontsize)
         ax.grid(False)
 
         if log_scale:
@@ -279,16 +301,16 @@ class RatingFactorTrend:
         dp = int(max(np.abs(np.log10(dp)) - 2, 0))
 
         ax1.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f"{x:.{dp}%}"))
-        ax.tick_params(axis="both", which="major", labelsize=tick_fontsize)
-        ax1.tick_params(axis="y", which="major", labelsize=tick_fontsize)
-        ax1.set_ylabel(rightylabel, fontsize=label_fontsize)
+        ax.tick_params(axis="both", which="major", labelsize=self.tick_fontsize)
+        ax1.tick_params(axis="y", which="major", labelsize=self.tick_fontsize)
+        ax1.set_ylabel(rightylabel, fontsize=self.label_fontsize)
 
-        ax.set_title(var.replace("_level", ""), fontsize=title_fontsize)
+        ax.set_title(var.replace("_level", ""), fontsize=self.title_fontsize)
 
         # Combine legends
         lines, labels = ax.get_legend_handles_labels()
         bars, bar_labels = ax1.get_legend_handles_labels()
-        ax.legend(lines + bars, labels + bar_labels, loc="best", fontsize=tick_fontsize, facecolor="white")
+        ax.legend(lines + bars, labels + bar_labels, loc="best", fontsize=self.tick_fontsize, facecolor="white")
 
         ax.set_zorder(2)
         ax.patch.set_alpha(0)
@@ -300,9 +322,6 @@ class RatingFactorTrend:
         self,
         var,
         ax,
-        tick_fontsize=14,
-        label_fontsize=18,
-        title_fontsize=22,
     ):
         """
         Internal method to plot trend for a categorical variable.
@@ -317,6 +336,7 @@ class RatingFactorTrend:
         mapping = pd.read_excel(
             self.categorical_banding, sheet_name=var.replace("_cat_level", "")
         )
+        
         relativity_df = self.cat_rel_dict[var].set_index(var)
 
         df_groupby = relativity_df.join(mapping.set_index("Integer_Value"), on=var)
@@ -333,14 +353,14 @@ class RatingFactorTrend:
         )
 
         ax.grid(False)
-        ax.set_title(var.replace("_cat_level", ""), fontsize=title_fontsize)
-        ax.tick_params(axis="both", which="major", labelsize=tick_fontsize)
-        ax.set_ylabel(leftylabel, fontsize=label_fontsize)
+        ax.set_title(var.replace("_cat_level", ""), fontsize=self.title_fontsize)
+        ax.tick_params(axis="both", which="major", labelsize=self.tick_fontsize)
+        ax.set_ylabel(leftylabel, fontsize=self.label_fontsize)
         ax.set_xlabel("")
 
         # # Set the x-axis tickers
         x_label = df_groupby["Categorical_Level"].to_list()
-        ax.set_xticklabels(x_label, fontsize=tick_fontsize, rotation=0)
+        ax.set_xticklabels(x_label, fontsize=self.tick_fontsize, rotation=0)
 
         rightylabel = "Weight (%)"
         ax1 = ax.twinx()
@@ -358,13 +378,13 @@ class RatingFactorTrend:
         dp = round_down_to_power_of_10(diff)
         dp = int(max(np.abs(np.log10(dp)) - 2, 0))
         ax1.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f"{x:.{dp}%}"))
-        ax1.tick_params(axis="y", which="major", labelsize=tick_fontsize)
-        ax1.set_ylabel(rightylabel, fontsize=label_fontsize)
+        ax1.tick_params(axis="y", which="major", labelsize=self.tick_fontsize)
+        ax1.set_ylabel(rightylabel, fontsize=self.label_fontsize)
 
         # Combine legends
         lines, labels = ax.get_legend_handles_labels()
         bars, bar_labels = ax1.get_legend_handles_labels()
-        ax.legend(lines + bars, labels + bar_labels, loc="best", fontsize=tick_fontsize, facecolor="white")
+        ax.legend(lines + bars, labels + bar_labels, loc="best", fontsize=self.tick_fontsize, facecolor="white")
 
         ax.set_zorder(2)
         ax.patch.set_alpha(0)
@@ -372,53 +392,186 @@ class RatingFactorTrend:
         ax1.grid(False)
         ax1.set_facecolor("white")
 
+    def _interaction_trend(
+        self,
+        var,
+        ax,
+        log_scale,
+        is_reversed,
+        value_col,
+        cmap,
+        title_suffix,
+    ):
+         """
+        Plot interaction effects between two variables.
+
+        Args:
+            var (str): Name of the interaction term (e.g., "var1 x var2").
+            ax (matplotlib.axes.Axes): Matplotlib axes object to plot on.
+            log_scale (bool): Whether to use logarithmic scale for relativity.
+            is_reversed (bool): Whether to reverse the order of variables in interaction.
+            value_col (str): Name of the column containing values to plot.
+            cmap (matplotlib.colors.ColorMap): Colormap for different lines in the plot.
+            title_suffix (str): Additional text to append to the plot title.
+
+        Returns:
+            None. Plot is rendered on the provided axes object.
+
+        Raises:
+            AssertionError: If either variable in the interaction is not found in numerical or categorical dictionaries.
+        """
+        # Split the interaction terms into 
+        if is_reversed: 
+            var1 = var.split(" x ")[1]
+            var2 = var.split(" x ")[0]
+        else: 
+            var1 = var.split(" x ")[0]
+            var2 = var.split(" x ")[1]
+        var1_clean = var1.replace("_cat_level", "").replace("_level", "")
+        var2_clean = var2.replace("_cat_level", "").replace("_level", "")
+        
+        if var1 in self.num_rel_dict.keys(): 
+            banding1 = pd.read_excel(self.numerical_banding, sheet_name=var1_clean)
+            banding1["index"] = range(1, len(banding1) + 1)
+            banding1.set_index("index", inplace=True)
+        elif var1 in self.cat_rel_dict.keys():
+            banding1 = pd.read_excel(self.categorical_banding, sheet_name=var1_clean)
+            banding1.rename(
+                columns={"Integer_Value": "index", "Categorical_Level": "Level"}, inplace=True
+            )
+            banding1.set_index("index", inplace=True)
+        else: 
+            assert False, f"Variable '{var1}' not found in either numerical or categorical dictionary keys"
+
+        if var2 in self.num_rel_dict.keys(): 
+            banding2 = pd.read_excel(self.numerical_banding, sheet_name=var2_clean)
+            banding2["index"] = range(1, len(banding2) + 1)
+            banding2.set_index("index", inplace=True)
+        elif var2 in self.cat_rel_dict.keys():
+            banding2 = pd.read_excel(self.categorical_banding, sheet_name=var2_clean)
+            banding2.rename(
+                columns={"Integer_Value": "index", "Categorical_Level": "Level"}, inplace=True
+            )
+            banding2.set_index("index", inplace=True)
+        else: 
+            assert False, f"Variable '{var2}' not found in either numerical or categorical dictionary keys"
+
+        self.inter_rel_dict[var][var1 + "_name"] = self.inter_rel_dict[var][var1].map(
+            banding1["Level"].to_dict()
+        )
+        self.inter_rel_dict[var][var2 + "_name"] = self.inter_rel_dict[var][var2].map(
+            banding2["Level"].to_dict()
+        )
+
+        rel_wide = self.inter_rel_dict[var].sort_values([var1, var2]).pivot(
+            index=var1, columns=var2, values=value_col
+        )
+        
+        banding2_dict = banding2["Level"].to_dict()
+        column_name = [banding2_dict[i] for i in rel_wide.columns]
+        rel_wide.columns.name = var2_clean
+        rel_wide.columns = column_name
+        x_label = banding1["Level"].to_list()
+
+        column_len = len(rel_wide.columns)
+        if var2 in self.num_rel_dict.keys(): 
+            if column_len <= 5: 
+                divisor = 1
+            else:
+                divisor = 2
+            chosen_index = [i for i in range(column_len) if i % divisor == 0]
+        else: 
+            chosen_index = list(range(column_len))
+        num_colours = len(chosen_index) 
+        palette = [cmap(i / num_colours) for i in range(num_colours)]
+
+        sns.lineplot(data=rel_wide.iloc[:, chosen_index], ax=ax, palette=palette)
+    
+        if log_scale: 
+            ax.set_yscale("log")
+            leftylabel = "Relativity (Log-Scaled)"
+        else: 
+            leftylabel = "Relativity"
+
+        ax.set_xlabel(var1_clean, fontsize=self.label_fontsize)
+        ax.set_ylabel(leftylabel, fontsize=self.label_fontsize)
+        
+        x_index = rel_wide.index 
+        if var1 in self.num_rel_dict.keys():
+             x_index, x_label = select_ticks(
+                x_index, x_label
+            )
+
+        ax.xaxis.set_major_locator(mtick.FixedLocator(x_index))
+        ax.set_xticklabels(
+            x_label, fontsize=self.tick_fontsize, rotation=0 if var1 in self.num_rel_dict.keys() else 90
+        )
+        ax.tick_params(axis="both", which="major", labelsize=self.tick_fontsize)
+        ax.set_title(
+            f"{var1_clean} x {var2_clean} {title_suffix}", fontsize=self.title_fontsize
+        )
+        
+        ax.legend(
+            facecolor="white", 
+            fontsize=self.tick_fontsize, 
+            title=var2_clean, 
+            title_fontsize=self.label_fontsize,
+        )
+        ax.grid(False)
+        ax.set_facecolor("white")
+
     def plot_trend(
         self,
         var,
         ax,
         log_scale=False,
-        tick_fontsize=14,
-        label_fontsize=18,
-        title_fontsize=22,
+        is_reversed=False,
+        value_col=None,
+        cmap=red_blue,
+        title_suffix="",
     ):
         """
-        Plot trend for a given variable (numerical or categorical).
+        Plot trend for any variable type (numerical, categorical, or interaction).
 
         This method determines the type of variable and calls the appropriate internal method
-        to create the plot.
+        to create the visualization.
 
         Args:
             var (str): Name of the variable to plot.
             ax (matplotlib.axes.Axes): Matplotlib axes object to plot on.
-            log_scale (bool, optional): Whether to use logarithmic scale for relativity (only for numerical variables). Defaults to False.
-            tick_fontsize (int, optional): Font size for tick labels. Defaults to 14.
-            label_fontsize (int, optional): Font size for axis labels. Defaults to 18.
-            title_fontsize (int, optional): Font size for plot title. Defaults to 22.
+            log_scale (bool, optional): Whether to use logarithmic scale for relativity. Defaults to False.
+            is_reversed (bool, optional): Whether to reverse order of variables in interaction plots. Defaults to False.
+            value_col (str, optional): Column name containing values to plot for interaction terms.
+            cmap (matplotlib.colors.ColorMap, optional): Colormap for interaction plots. Defaults to red_blue.
+            title_suffix (str, optional): Additional text to append to plot titles. Defaults to "".
 
         Raises:
-            AssertionError: If the variable is not found in num_rel_dict or cat_rel_dict.
+            AssertionError: If the variable is not found in numerical or categorical dictionaries.
         """
-        assert (
-            var in self.num_rel_dict.keys() or var in self.cat_rel_dict.keys()
-        ), "Variable not used in the model."
+        
         if var.find(" x ") != -1:
-            pass
+            self._interaction_trend(
+                var, 
+                ax, 
+                log_scale=log_scale, 
+                is_reversed=is_reversed, 
+                value_col=value_col,
+                cmap=cmap,
+                title_suffix=title_suffix,
+            )
         elif var in self.num_rel_dict.keys():
+            assert (
+                var in self.num_rel_dict.keys() or var in self.cat_rel_dict.keys()
+            ), "Variable not used in the model."
             self._num_var_trend(
                 var,
                 log_scale=log_scale,
                 ax=ax,
-                tick_fontsize=tick_fontsize,
-                label_fontsize=label_fontsize,
-                title_fontsize=title_fontsize,
             )
         else:
             self._cat_var_trend(
                 var,
                 ax=ax,
-                tick_fontsize=tick_fontsize,
-                label_fontsize=label_fontsize,
-                title_fontsize=title_fontsize,
             )
 
 
