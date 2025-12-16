@@ -1,0 +1,48 @@
+---
+title: "ILEC data analysis"
+author: "Michiel Luteijn"
+date: '2025-12-16'
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r package install, results=FALSE, message=FALSE, warning=FALSE, include = F}
+packages <- c("data.table", "dplyr", "ggplot2", "magrittr", "purrr", "knitr", "stringr", "plyr", "htmlTable", "lme4", "statmod", "glmnet", "splines", "MASS", "rms", "caret", "foreach", "parallel", "readr", "arrow", "doSNOW", "here")
+
+for (pkg in packages){
+  if(!pkg %in% rownames(installed.packages())){
+    install.packages(pkg)
+  } 
+}
+library("purrr")
+quietly(lapply(packages, library, character.only = T)) %>% suppressWarnings()
+
+rm(packages, pkg)
+quietly(gc())
+```
+
+```{r Register parallel backend, include=FALSE}
+if(!exists("cl")){
+  cl <- parallel::makeCluster(8, type = "SOCK") # Creating a SOCK cluster
+  doSNOW::registerDoSNOW(cl)
+}
+```
+
+```{r Data load, include=FALSE}
+fpath = "Data/ILEC_2012_19 - 20240429.parquet"
+
+if(!file.exists(here::here(fpath))){
+  source("R/Helpers/read_data_and_save_parquet.R")
+  } else {
+    ilec <- arrow::read_parquet(here::here(fpath))
+    }
+```
+
+
