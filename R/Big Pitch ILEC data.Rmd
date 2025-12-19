@@ -13,21 +13,26 @@ output:
 
 ## Objectives
 **Big Pitch submission**
-Health and care (H&C) actuaries are well positioned to benefit from recent advances in data science, as machine learning (ML) techniques have become increasingly transparent and accessible.
+Health and care (H&C) actuaries are well positioned to benefit from recent advances in data science, as machine learning (ML) techniques have become increasingly transparent and accessible. <br>
 
-Once seen as opaque, explainable ML now enables actuaries to improve predictive power whilst maintaining interpretability. Explainable ML can enhance traditional methods, whilst retaining the ability to infuse actuarial judgement. 
+Once seen as opaque, explainable ML now enables actuaries to improve predictive power whilst maintaining interpretability. Explainable ML can enhance traditional methods, whilst retaining the ability to infuse actuarial judgement.  <br>
 
 We will demonstrate that H&C actuaries can have the best of both worlds by combining transparency, expert knowledge, and modern analytical innovation.
 
 **IFoA webpage**
-TITLE: Breaking down the black box: why actuaries should embrace machine learning now
-Desciption: Achieving the best of both worlds with explainable machine learning [H&C: Data Techniques in H&C WP].
+TITLE: Breaking down the black box: why actuaries should embrace machine learning now. <br>
+Description: Achieving the best of both worlds with explainable machine learning [H&C: Data Techniques in H&C WP].
 
 ## Decisions made
+**Study design**
+- It was decided in Dec to build incidence models (i.e. from scratch with lives exposure as the offset) <br>
+- Dec 19th - Provisionally decided to have the last 2 calendar years (2018-2019) as the holdout
+
+**Study inclusion criteria**
 - Dec 19th - decided TERM only <br>
 - Dec 19th - to take out fields with no exposure (none of these have claims) <br>
 - Dec 19th - decided the cut-off for issue year should be 1980 onwards <br>
-- Dec 19th - decided the cut-off for observation year should be 2000 onwards <br>
+- Dec 19th - decided the all observation years (2012-2019) will be included <br>
 - Dec 19th - decided the range for issueAge should be 18-80 <br>
 - Dec 19th - decided the range for Attained_Age should be 18-90 <br>
 - Dec 19th - No exclusions made based on combinations of SOA_Guar_Lvl_TP and duration (for now), or Face_Amount_Band
