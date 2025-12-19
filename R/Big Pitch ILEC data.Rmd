@@ -9,6 +9,19 @@ output:
     code_folding: hide
 ---
 
+# Background  {.tabset}
+
+## Objectives
+
+## Decisions made
+- Dec 19th - decided TERM only <br>
+- Dec 19th - to take out fields with no exposure (none of these have claims) <br>
+- Dec 19th - decided the cut-off for issue year should be 1980 onwards <br>
+- Dec 19th - decided the cut-off for observation year should be 2000 onwards <br>
+- Dec 19th - decided the range for issueAge should be 18-80 <br>
+- Dec 19th - decided the range for Attained_Age should be 18-90 <br>
+- Dec 19th - No exclusions made based on combinations of SOA_Guar_Lvl_TP and duration (for now), or Face_Amount_Band
+
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
