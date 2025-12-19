@@ -12,6 +12,16 @@ output:
 # Background  {.tabset}
 
 ## Objectives
+**Big Pitch submission**
+Health and care (H&C) actuaries are well positioned to benefit from recent advances in data science, as machine learning (ML) techniques have become increasingly transparent and accessible.
+
+Once seen as opaque, explainable ML now enables actuaries to improve predictive power whilst maintaining interpretability. Explainable ML can enhance traditional methods, whilst retaining the ability to infuse actuarial judgement. 
+
+We will demonstrate that H&C actuaries can have the best of both worlds by combining transparency, expert knowledge, and modern analytical innovation.
+
+**IFoA webpage**
+TITLE: Breaking down the black box: why actuaries should embrace machine learning now
+Desciption: Achieving the best of both worlds with explainable machine learning [H&C: Data Techniques in H&C WP].
 
 ## Decisions made
 - Dec 19th - decided TERM only <br>
