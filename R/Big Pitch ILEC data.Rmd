@@ -79,6 +79,8 @@ if(!file.exists(here::here(fpath))){
 ```
 
 # Data filtering
+- AtoEs based on SOA-supplied ExpDth_VBT2015wMI_Cnt that came with the dataset.
+
 ```{r Data filters}
 ilec <- log_detailed_summary(ilec, quote(!Policies_Exposed == 0), reason = "Taking out zero exposure fields")
 ilec <- log_detailed_summary(ilec, quote(Issue_Year >= 1980), reason = "Removed IssueYear pre-1980")

@@ -8,9 +8,9 @@ log_detailed_summary <- function(data, filter_expr = NULL, reason = NULL) {
       stop("Rows lost executing this operation")
     }
     summary <- dataout[, .(
-      Excluded_Deaths = sum(Death_Count) %>% round(2)#,
-      #Excluded_AtoE = (sum(Death_Count)/sum(expected_L)*100) %>% round(2),
-      #Excluded_Avg_IssueYear = weighted.mean(IssueYear, expected_L) %>% round(2)
+      Excluded_Deaths = sum(Death_Count) %>% round(2),
+      Excluded_AtoE_lives = (sum(Death_Count)/sum(ExpDth_VBT2015wMI_Cnt)*100) %>% round(2),
+      Excluded_Avg_IssueYear = weighted.mean(Issue_Year, ExpDth_VBT2015wMI_Cnt) %>% round(2)
     )]
     summary$Excluded_nrow <- nrow(dataout)
     summary$operation <- paste(filter_expr, collapse = "")

@@ -5,8 +5,8 @@ ilec <- read_delim("Data/ILEC_2012_19 - 20240429.txt",
                    trim_ws = TRUE) %>% data.table
 Sys.time() - start # 3 minutes
 
-drop_columns <- grep("^(ExpDth_|Cen)", names(ilec), value = TRUE)
-ilec[, (drop_columns) := NULL]
+#drop_columns <- grep("^(ExpDth_|Cen)", names(ilec), value = TRUE)
+#ilec[, (drop_columns) := NULL]
 
 # retain TERM business
 ilec <- ilec[Insurance_Plan == "Term"]
