@@ -4,7 +4,7 @@ import re
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mtick
 import seaborn as sns
-from ..utility import *
+from ..utils import *
 from pygam import GAM, s, te, f, l, utils
 
 from . import *
@@ -402,7 +402,7 @@ class RatingFactorTrend:
         cmap,
         title_suffix,
     ):
-         """
+        """
         Plot interaction effects between two variables.
 
         Args:
@@ -580,10 +580,10 @@ class FactorImpCV:
     A class for calculating feature importance using cross-validation with Generalized Additive Models (GAM).
 
     This class implements a method to compute feature importance scores based on the change in Poisson deviance
-    when each feature is "neutralized" (set to its mean or mode). It uses k-fold cross-validation to ensure
+    when each feature is "neutralised" (set to its mean or mode). It uses k-fold cross-validation to ensure
     robust estimates.
 
-    Attributes are initialized in the __init__ method.
+    Attributes are initialised in the __init__ method.
 
     Methods:
         fit(i): Fits a GAM model for a specific fold.
@@ -679,7 +679,7 @@ class FactorImpCV:
         Compute feature importance scores across all folds.
 
         This method fits GAM models for each fold, calculates the baseline deviance,
-        and then computes the change in deviance when each feature is "neutralized".
+        and then computes the change in deviance when each feature is "neutralised".
         The change in deviance is used as the measure of feature importance.
 
         Returns:

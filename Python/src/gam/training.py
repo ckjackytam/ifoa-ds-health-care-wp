@@ -1,4 +1,4 @@
-from src.utility import *
+from src.utils import *
 import numpy as np
 from pygam import GAM, s, te, f, l, utils
 import pandas as pd
@@ -165,14 +165,14 @@ class OptunaGamObjectiveCV:
     """
     A custom objective class for Optuna optimization of Generalized Additive Models (GAMs).
 
-    This class encapsulates the objective function for Optuna to optimize GAM hyperparameters using cross validation.
+    This class encapsulates the objective function for Optuna to optimise GAM hyperparameters using cross validation.
     It handles the training of GAMs across multiple folds, prediction on the validation folds,
     and calculation of the Poisson loss for model evaluation.
 
     Attributes are initialized through the constructor. See `__init__` method for details.
 
     Methods:
-        __call__(trial): The objective function to be optimized by Optuna.
+        __call__(trial): The objective function to be optimised by Optuna.
 
     """
 
@@ -197,6 +197,7 @@ class OptunaGamObjectiveCV:
         Initialize the OptunaGamObjectiveCV.
 
         Parameters:
+        -----------
             term_string (str): The term structure string for the GAM.
             num_folds (int): Number of cross-validation folds.
             n_splines_range (tuple): Range for number of splines (min, max).
@@ -491,8 +492,8 @@ def extract_relativity(
             interaction_map1
         ), "Duplicated interaction terms found."
 
-        vars_in_interacton = list(interaction_map1.values())
-        vars_in_interacton = set(list(chain(*vars_in_interacton)))
+        vars_in_interaction = list(interaction_map1.values())
+        vars_in_interaction = set(list(chain(*vars_in_interaction)))
         full_vars = set(list(num_feat_map.values()) + list(cat_feat_map.values()))
         assert (
             len(vars_in_interaction - full_vars) == 0
