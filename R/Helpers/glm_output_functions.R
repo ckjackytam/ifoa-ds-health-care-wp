@@ -27,7 +27,7 @@ glm_rr_table <- function(fit, conf_level = 0.95, digits = 3) {
     if (is.factor(mf[[nm]])) {
       bl <- levels(mf[[nm]])[1] 
       idx <- grepl(paste0("^", nm), term_labels)
-      baselines[idx] <- paste0(nm, " baseline: ", bl)
+      baselines[idx] <- paste0(nm, ": ", bl)
     }
   }
   baselines[baselines == ""] <- NA_character_
@@ -40,12 +40,13 @@ glm_rr_table <- function(fit, conf_level = 0.95, digits = 3) {
     `Estimate`   = cf,
     `Std. Error` = se,
     `z value`    = z,
-    `Pr(>|z|)`   = pval,
+    `absolute z value`    = abs(z),
+    #`Pr(>|z|)`   = pval,
     `Baseline (if factor)` = baselines,
     check.names  = FALSE
   )
   
-  num_cols <- c("Rate ratio","Lower CI","Upper CI","Estimate","Std. Error","z value","Pr(>|z|)")
+  num_cols <- c("Rate ratio","Lower CI","Upper CI","Estimate","Std. Error","z value","absolute z value")
   out[num_cols] <- lapply(out[num_cols], function(x) signif(x, digits))
   out
 }
@@ -57,7 +58,7 @@ glm_dt_options <- function() {
     pageLength = 25,
     scrollX = TRUE,
     deferRender = TRUE,
-    order = list(list(7, "asc")),
+    order = list(list(7, "desc")),
     columnDefs = list(
       list(targets = 0, className = "dt-left"),
       list(targets = 1:3, className = "dt-right"),
@@ -68,17 +69,17 @@ glm_dt_options <- function() {
 
 glm_dt_format <- function(dt) {
   dt %>%
-    formatStyle(
-      "Pr(>|z|)",
-      backgroundColor = styleInterval(c(0.001, 0.01, 0.05),
-                                      c("#e8f5e9", "#c8e6c9", "#fff9c4", "#ffebee")
-      )
-    ) %>%
+#    formatStyle(
+#      "Pr(>|z|)",
+#      backgroundColor = styleInterval(c(0.001, 0.01, 0.05),
+#                                      c("#e8f5e9", "#c8e6c9", "#fff9c4", "#ffebee")
+#      )
+#    ) %>%
     formatStyle(
       "Rate ratio",
       color = styleInterval(1, c("#1b5e20", "#b71c1c")) # <1 green, >1 red
     ) %>%
-    formatRound(c("Rate ratio","Lower CI","Upper CI","Estimate","Std. Error","z value","Pr(>|z|)"), digits = 3) %>%
+    formatRound(c("Rate ratio","Lower CI","Upper CI","Estimate","Std. Error","z value","absolute z value"), digits = 3) %>%
     htmlwidgets::onRender(
       "
       function(el, x) {
