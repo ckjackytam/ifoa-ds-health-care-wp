@@ -92,8 +92,64 @@ ilec <- log_detailed_summary(ilec, quote(Issue_Age <= 80), reason = "Removed Iss
 DT::datatable(attributes(ilec)$filter_summary)
 ```
 
+```{r aggregate to speed up analytics}
+group_cols <- c("Observation_Year", "Sex", "Smoker_Status", "Issue_Age", "Duration", "Face_Amount_Band", "Issue_Year", "Attained_Age", "Preferred_Indicator", "Number_of_Pfd_Classes", "Preferred_Class")
+measure_cols <- c("Death_Count", "Policies_Exposed", "ExpDth_VBT2015wMI_Cnt")
 
+ilec <- ilec[, lapply(.SD, sum, na.rm = TRUE), by = group_cols, .SDcols = measure_cols]
+```
 
+```{r covert chars to factors}
+char_cols <- names(ilec)[sapply(ilec, is.character)]
+ilec[, (char_cols) := lapply(.SD, as.factor), .SDcols = char_cols]
+```
+
+```{r feature engineering}
+ilec <- gen_features(ilec)
+```
+
+# Basic GLM {.tabset}
+- First build age only. The age only model will be the offset for models downstream to allow for better interpretation of regression coefficients. 
+
+```{r GLM}
+f <- list()
+f$age_fit <- stats::as.formula(
+  Death_Count ~ 
+    (agepoly1 + agepoly2 + agepoly3)
+  )
+glm_age_fit <- glm(as.formula(f$age_fit), ilec, family = "poisson", offset = log(Policies_Exposed))
+```
+
+## Age model
+```{r }
+DT::datatable(
+  glm_rr_table(glm_age_fit),
+  rownames = FALSE,
+  extensions = "Buttons",
+  options = glm_dt_options()
+) %>% glm_dt_format()
+```
+
+```{r add pred}
+ilec[, c("age_pred") := predict(glm_age_fit, ilec, newoffset = ilec$Policies_Exposed) %>% exp]
+```
+
+```{r GLM basic}
+f$basic <- stats::as.formula(
+  Death_Count ~ (Sex * Smoker_Status + Face_Amount_Band + Preferred_Indicator + Issue_Agepoly1 + Issue_Agepoly2 + invDur + dur_sq + dur0)
+  )
+glm_basic <- glm(as.formula(f$basic), ilec, family = "poisson", offset = log(age_pred))
+```
+
+## Stacked basic model
+```{r }
+DT::datatable(
+  glm_rr_table(glm_basic),
+  rownames = FALSE,
+  extensions = "Buttons",
+  options = glm_dt_options()
+) %>% glm_dt_format()
+```
 
 
 
