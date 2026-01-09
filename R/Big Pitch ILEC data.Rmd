@@ -172,14 +172,38 @@ DT::datatable(
 ) %>% glm_dt_format()
 ```
 
-```{r add basic model pred}
+```{r add age model pred}
 ilec[, c("basic_pred") := predict(glm_basic, ilec, newoffset = ilec$age_pred) %>% exp]
 ```
 
 # Visuals of model fit {.tabset}
+
+## Age model {.tabset}
 ```{r }
 ae_plots  <- setNames(vector("list", length(group_cols)), group_cols)
 actual_col <- "Death_Count"
+pred_col   <- "age_pred"
+
+ae_plots <- setNames(
+  lapply(group_cols, function(gc) {
+    summ <- ae_summary_by(ilec, gc)
+    ae_plot(summ, gc, top_n = 50)
+  }),
+  group_cols
+)
+```
+
+``` {r, results = 'asis', echo = F}
+for(i in 1:length(ae_plots)){
+  cat(paste0("### ", names(ae_plots)[i]," \n"))
+  print(htmltools::tagList(plotly::ggplotly(ae_plots[[i]])))
+}
+```
+
+## Basic GLM {.tabset}
+
+```{r }
+ae_plots  <- setNames(vector("list", length(group_cols)), group_cols)
 pred_col   <- "basic_pred"
 
 ae_plots <- setNames(
@@ -193,7 +217,8 @@ ae_plots <- setNames(
 
 ``` {r, results = 'asis', echo = F}
 for(i in 1:length(ae_plots)){
-  cat(paste0("## ", names(ae_plots)[i]," \n"))
+  cat(paste0("### ", names(ae_plots)[i]," \n"))
   print(htmltools::tagList(plotly::ggplotly(ae_plots[[i]])))
 }
 ```
+
