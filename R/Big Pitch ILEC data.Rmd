@@ -35,7 +35,9 @@ Description: Achieving the best of both worlds with explainable machine learning
 - Dec 19th - decided the all observation years (2012-2019) will be included <br>
 - Dec 19th - decided the range for issueAge should be 18-80 <br>
 - Dec 19th - decided the range for Attained_Age should be 18-90 <br>
-- Dec 19th - No exclusions made based on combinations of SOA_Guar_Lvl_TP and duration (for now), or Face_Amount_Band
+- Dec 19th - No exclusions made based on combinations of SOA_Guar_Lvl_TP and duration (for now), or Face_Amount_Band <br>
+- Jan 9th - decided the cap duration at 20 due to concerns about data quality at (very) high durations and low volumes of data
+
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
@@ -93,14 +95,18 @@ if(!file.exists(here::here(fpath))){
 
 # Data filtering
 - AtoEs based on SOA-supplied ExpDth_VBT2015wMI_Cnt that came with the dataset.
+- For age nearest birthday, half a year is subtracted from AttainedAge prior to AttainedAge filters
 
 ```{r Data filters}
+ilec[, c("Attained_Age") := fifelse(Age_Ind == "ALB", Attained_Age, Attained_Age-0.5)]
+
 ilec <- log_detailed_summary(ilec, quote(!Policies_Exposed == 0), reason = "Taking out zero exposure fields")
 ilec <- log_detailed_summary(ilec, quote(Issue_Year >= 1980), reason = "Removed IssueYear pre-1980")
 ilec <- log_detailed_summary(ilec, quote(Attained_Age >= 18), reason = "Removed Attained_Age below 18")
 ilec <- log_detailed_summary(ilec, quote(Attained_Age <= 90), reason = "Removed Attained_Age above 90")
 ilec <- log_detailed_summary(ilec, quote(Issue_Age >= 18), reason = "Removed Issue_Age below 18")
 ilec <- log_detailed_summary(ilec, quote(Issue_Age <= 80), reason = "Removed Issue_Age above 80")
+ilec <- log_detailed_summary(ilec, quote(Duration <= 20), reason = "Removed duration above 20")
 
 DT::datatable(attributes(ilec)$filter_summary)
 ```
@@ -136,8 +142,8 @@ ilec <- gen_features(ilec)
 f <- list()
 f$age_fit <- stats::as.formula(
   Death_Count ~ 
-    (agepoly1 + agepoly2 + agepoly3)
-  )
+    (agepoly1 + agepoly2 + agepoly3 + agespline2 + agespline3 + agespline4)
+)
 glm_age_fit <- glm(as.formula(f$age_fit), ilec, family = "poisson", offset = log(Policies_Exposed))
 ```
 
@@ -179,6 +185,8 @@ ilec[, c("basic_pred") := predict(glm_basic, ilec, newoffset = ilec$age_pred) %>
 # Visuals of model fit {.tabset}
 
 ## Age model {.tabset}
+- Note the attained_age pattern is likely due to differences in experience for products that record "age last birthday" versus products that record "age nearest birthday". <br>
+
 ```{r }
 ae_plots  <- setNames(vector("list", length(group_cols)), group_cols)
 actual_col <- "Death_Count"
