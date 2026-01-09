@@ -1,8 +1,11 @@
 gen_features <- function(dataset){
   agepoly <- poly(dataset$Attained_Age, 3) %>% data.table
   entry_agepoly <- poly(dataset$Issue_Age, 3) %>% data.table
+  agesplines <- ns(dataset$Attained_Age, knots = c(20, 30, 40, 50), Boundary.knots = c(18, 90)) %>% data.table
+  
   names(agepoly) <- paste0("agepoly", seq(1,3,1))
   names(entry_agepoly) <- paste0("Issue_Agepoly", seq(1,3,1))
+  names(agesplines) <- paste0("agespline", seq(1,5,1))
   
   dataset[, ':=' (dur0 = fifelse(Duration == 1, 1, 0),
                   invDur = 1/(Duration),
@@ -19,7 +22,7 @@ gen_features <- function(dataset){
   )]
   
   dataset <- cbind(
-    dataset, agepoly, entry_agepoly
+    dataset, agepoly, entry_agepoly, agesplines
   ) %>% data.table
   
   if("Observation_Year" %in% names(dataset)){
