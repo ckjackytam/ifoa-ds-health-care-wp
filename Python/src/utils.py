@@ -151,6 +151,59 @@ def select_ticks(x_index, x_label):
     return x_index[::step], x_label[::step]
 
 
+def risk_agg(
+    df: pd.DataFrame, var: str, exposure: str, act_death_count: str, **kwarg
+) -> pd.DataFrame:
+    """
+    Aggregate risk metrics by a grouping variable and calculate death/event rates.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Input DataFrame containing risk data.
+    var : str
+        Column name to group by.
+    exposure : str
+        Column name for exposure values.
+    act_death_count : str
+        Column name for actual death counts.
+    **kwarg : str
+        Additional count columns to aggregate and convert to rates.
+
+    Returns
+    -------
+    pd.DataFrame
+        Aggregated DataFrame
+    """
+
+    agg_dict = {exposure: "sum", act_death_count: "sum"}
+    for _, v in kwarg.items():
+        agg_dict[v] = "sum"
+    df_agg = df.groupby(var, dropna=False).agg(agg_dict)
+    df_agg["actual_death_rate"] = df_agg[act_death_count] / df_agg[exposure]
+
+    for k, v in kwarg.items():
+        df_agg[k.replace("count", "rate")] = df_agg[v] / df_agg[exposure]
+
+    return df_agg
+
+
+def save_risk_agg_to_excel(risk_agg_dict: dict, filepath: str):
+    """
+    Save each DataFrame in the dict to a separate sheet in an Excel file.
+
+    Parameters
+    ----------
+    risk_agg_dict : dict
+        Dictionary where keys are sheet names and values are DataFrames.
+    filepath : str
+        Output Excel file path.
+    """
+    with pd.ExcelWriter(filepath, engine="openpyxl") as writer:
+        for sheet_name, df in risk_agg_dict.items():
+            df.to_excel(writer, sheet_name=sheet_name)
+
+
 class DoubleLift:
     """
     A class for creating and visualizing double lift tables to compare two prediction models against a target variable.
