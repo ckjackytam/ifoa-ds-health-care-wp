@@ -35,14 +35,16 @@ Description: Achieving the best of both worlds with explainable machine learning
 - Dec 19th - decided the all observation years (2012-2019) will be included <br>
 - Dec 19th - decided the range for issueAge should be 18-80 <br>
 - Dec 19th - decided the range for Attained_Age should be 18-90 <br>
-- Dec 19th - No exclusions made based on combinations of SOA_Guar_Lvl_TP and duration (for now), or Face_Amount_Band
+- Dec 19th - No exclusions made based on combinations of SOA_Guar_Lvl_TP and duration (for now), or Face_Amount_Band <br>
+- Jan 9th - decided the cap duration at 20 due to concerns about data quality at (very) high durations and low volumes of data
+
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
 ```{r package install, results=FALSE, message=FALSE, warning=FALSE, include = F}
-packages <- c("data.table", "dplyr", "ggplot2", "magrittr", "purrr", "knitr", "stringr", "plyr", "htmlTable", "lme4", "statmod", "glmnet", "splines", "MASS", "rms", "caret", "foreach", "parallel", "readr", "arrow", "doSNOW", "here")
+packages <- c("data.table", "dplyr", "ggplot2", "magrittr", "purrr", "knitr", "stringr", "plyr", "htmlTable", "lme4", "statmod", "glmnet", "splines", "MASS", "rms", "caret", "foreach", "parallel", "readr", "arrow", "doSNOW", "here", "htmltools", "plotly")
 
 for (pkg in packages){
   if(!pkg %in% rownames(installed.packages())){
@@ -54,6 +56,19 @@ quietly(lapply(packages, library, character.only = T)) %>% suppressWarnings()
 
 rm(packages, pkg)
 quietly(gc())
+```
+
+```{r, include=FALSE, echo=FALSE}
+library(plotly)
+knitr::opts_chunk$set(warning = FALSE)
+knitr::opts_chunk$set(fig.showtext = TRUE)
+```
+
+```{r, include=FALSE, echo=FALSE}
+# Source https://stackoverflow.com/questions/60685631/using-ggplotly-and-dt-from-a-for-loop-in-rmarkdown
+# Init Step to make sure that the dependencies are loaded
+htmltools::tagList(DT::datatable(cars))
+htmltools::tagList(ggplotly(ggplot()))
 ```
 
 ```{r Register parallel backend, include=FALSE}
@@ -80,20 +95,138 @@ if(!file.exists(here::here(fpath))){
 
 # Data filtering
 - AtoEs based on SOA-supplied ExpDth_VBT2015wMI_Cnt that came with the dataset.
+- For age nearest birthday, half a year is subtracted from AttainedAge prior to AttainedAge filters
 
 ```{r Data filters}
+ilec[, c("Attained_Age") := fifelse(Age_Ind == "ALB", Attained_Age, Attained_Age-0.5)]
+
 ilec <- log_detailed_summary(ilec, quote(!Policies_Exposed == 0), reason = "Taking out zero exposure fields")
 ilec <- log_detailed_summary(ilec, quote(Issue_Year >= 1980), reason = "Removed IssueYear pre-1980")
 ilec <- log_detailed_summary(ilec, quote(Attained_Age >= 18), reason = "Removed Attained_Age below 18")
 ilec <- log_detailed_summary(ilec, quote(Attained_Age <= 90), reason = "Removed Attained_Age above 90")
 ilec <- log_detailed_summary(ilec, quote(Issue_Age >= 18), reason = "Removed Issue_Age below 18")
 ilec <- log_detailed_summary(ilec, quote(Issue_Age <= 80), reason = "Removed Issue_Age above 80")
+ilec <- log_detailed_summary(ilec, quote(Duration <= 20), reason = "Removed duration above 20")
 
 DT::datatable(attributes(ilec)$filter_summary)
 ```
 
+```{r aggregate to speed up analytics}
+group_cols <- c("Observation_Year", "Sex", "Smoker_Status", "Issue_Age", "Duration", "Face_Amount_Band", "Issue_Year", "Attained_Age", "Preferred_Indicator", "Number_of_Pfd_Classes", "Preferred_Class")
+measure_cols <- c("Death_Count", "Policies_Exposed", "ExpDth_VBT2015wMI_Cnt")
 
+ilec <- ilec[, lapply(.SD, sum, na.rm = TRUE), by = group_cols, .SDcols = measure_cols]
+```
 
+```{r covert chars to factors}
+char_cols <- names(ilec)[sapply(ilec, is.character)]
+cols_to_order <- c("Face_Amount_Band", "Preferred_Class", "Number_of_Pfd_Classes", "Preferred_Indicator")
 
+ilec[, (char_cols) := lapply(.SD, as.factor), .SDcols = char_cols]
+ilec[, (cols_to_order) := lapply(.SD, function(x) {
+  lv <- unique(x)
+  f  <- factor(x, levels = lv, ordered = TRUE)
+  contrasts(f) <- contr.treatment(levels(f))
+  f
+  }), .SDcols = cols_to_order]
+```
 
+```{r feature engineering}
+ilec <- gen_features(ilec)
+```
+
+# Basic GLM {.tabset}
+- First build age only. The age only model will be the offset for models downstream to allow for better interpretation of regression coefficients. 
+
+```{r GLM}
+f <- list()
+f$age_fit <- stats::as.formula(
+  Death_Count ~ 
+    (agepoly1 + agepoly2 + agepoly3 + agespline2 + agespline3 + agespline4)
+)
+glm_age_fit <- glm(as.formula(f$age_fit), ilec, family = "poisson", offset = log(Policies_Exposed))
+```
+
+## Age model
+```{r }
+DT::datatable(
+  glm_rr_table(glm_age_fit),
+  rownames = FALSE,
+  extensions = "Buttons",
+  options = glm_dt_options()
+) %>% glm_dt_format()
+```
+
+```{r add pred}
+ilec[, c("age_pred") := predict(glm_age_fit, ilec, newoffset = ilec$Policies_Exposed) %>% exp]
+```
+
+```{r GLM basic}
+f$basic <- stats::as.formula(
+  Death_Count ~ (Sex * Smoker_Status + Face_Amount_Band + Preferred_Indicator + Issue_Agepoly1 + Issue_Agepoly2 + Duration + invDur + dur_sq + dur_cube)
+  )
+glm_basic <- glm(as.formula(f$basic), ilec, family = "poisson", offset = log(age_pred))
+```
+
+## Stacked basic model
+```{r }
+DT::datatable(
+  glm_rr_table(glm_basic),
+  rownames = FALSE,
+  extensions = "Buttons",
+  options = glm_dt_options()
+) %>% glm_dt_format()
+```
+
+```{r add age model pred}
+ilec[, c("basic_pred") := predict(glm_basic, ilec, newoffset = ilec$age_pred) %>% exp]
+```
+
+# Visuals of model fit {.tabset}
+
+## Age model {.tabset}
+- Note the attained_age pattern is likely due to differences in experience for products that record "age last birthday" versus products that record "age nearest birthday". <br>
+
+```{r }
+ae_plots  <- setNames(vector("list", length(group_cols)), group_cols)
+actual_col <- "Death_Count"
+pred_col   <- "age_pred"
+
+ae_plots <- setNames(
+  lapply(group_cols, function(gc) {
+    summ <- ae_summary_by(ilec, gc)
+    ae_plot(summ, gc, top_n = 50)
+  }),
+  group_cols
+)
+```
+
+``` {r, results = 'asis', echo = F}
+for(i in 1:length(ae_plots)){
+  cat(paste0("### ", names(ae_plots)[i]," \n"))
+  print(htmltools::tagList(plotly::ggplotly(ae_plots[[i]])))
+}
+```
+
+## Basic GLM {.tabset}
+
+```{r }
+ae_plots  <- setNames(vector("list", length(group_cols)), group_cols)
+pred_col   <- "basic_pred"
+
+ae_plots <- setNames(
+  lapply(group_cols, function(gc) {
+    summ <- ae_summary_by(ilec, gc)
+    ae_plot(summ, gc, top_n = 50)
+  }),
+  group_cols
+)
+```
+
+``` {r, results = 'asis', echo = F}
+for(i in 1:length(ae_plots)){
+  cat(paste0("### ", names(ae_plots)[i]," \n"))
+  print(htmltools::tagList(plotly::ggplotly(ae_plots[[i]])))
+}
+```
 
