@@ -37,6 +37,7 @@ Description: Achieving the best of both worlds with explainable machine learning
 - Dec 19th - decided the range for Attained_Age should be 18-90 <br>
 - Dec 19th - No exclusions made based on combinations of SOA_Guar_Lvl_TP and duration (for now), or Face_Amount_Band <br>
 - Jan 9th - decided the cap duration at 20 due to concerns about data quality at (very) high durations and low volumes of data
+- Jan 13th - decided the exclude unknown smoking status
 
 
 ```{r setup, include=FALSE}
@@ -98,8 +99,6 @@ if(!file.exists(here::here(fpath))){
 - For age nearest birthday, half a year is subtracted from AttainedAge prior to AttainedAge filters
 
 ```{r Data filters}
-ilec[, c("Attained_Age") := fifelse(Age_Ind == "ALB", Attained_Age, Attained_Age-0.5)]
-
 ilec <- log_detailed_summary(ilec, quote(!Policies_Exposed == 0), reason = "Taking out zero exposure fields")
 ilec <- log_detailed_summary(ilec, quote(Issue_Year >= 1980), reason = "Removed IssueYear pre-1980")
 ilec <- log_detailed_summary(ilec, quote(Attained_Age >= 18), reason = "Removed Attained_Age below 18")
@@ -107,12 +106,13 @@ ilec <- log_detailed_summary(ilec, quote(Attained_Age <= 90), reason = "Removed 
 ilec <- log_detailed_summary(ilec, quote(Issue_Age >= 18), reason = "Removed Issue_Age below 18")
 ilec <- log_detailed_summary(ilec, quote(Issue_Age <= 80), reason = "Removed Issue_Age above 80")
 ilec <- log_detailed_summary(ilec, quote(Duration <= 20), reason = "Removed duration above 20")
+ilec <- log_detailed_summary(ilec, quote(Smoker_Status != "U"), reason = "Removed unknown smoking status")
 
 DT::datatable(attributes(ilec)$filter_summary)
 ```
 
 ```{r aggregate to speed up analytics}
-group_cols <- c("Observation_Year", "Sex", "Smoker_Status", "Issue_Age", "Duration", "Face_Amount_Band", "Issue_Year", "Attained_Age", "Preferred_Indicator", "Number_of_Pfd_Classes", "Preferred_Class")
+group_cols <- c("Observation_Year", "Sex", "Smoker_Status", "Issue_Age", "Duration", "Face_Amount_Band", "Issue_Year", "Attained_Age")
 measure_cols <- c("Death_Count", "Policies_Exposed", "ExpDth_VBT2015wMI_Cnt")
 
 ilec <- ilec[, lapply(.SD, sum, na.rm = TRUE), by = group_cols, .SDcols = measure_cols]
@@ -120,7 +120,7 @@ ilec <- ilec[, lapply(.SD, sum, na.rm = TRUE), by = group_cols, .SDcols = measur
 
 ```{r covert chars to factors}
 char_cols <- names(ilec)[sapply(ilec, is.character)]
-cols_to_order <- c("Face_Amount_Band", "Preferred_Class", "Number_of_Pfd_Classes", "Preferred_Indicator")
+cols_to_order <- c("Face_Amount_Band")
 
 ilec[, (char_cols) := lapply(.SD, as.factor), .SDcols = char_cols]
 ilec[, (cols_to_order) := lapply(.SD, function(x) {
@@ -131,8 +131,20 @@ ilec[, (cols_to_order) := lapply(.SD, function(x) {
   }), .SDcols = cols_to_order]
 ```
 
+```{r test train split}
+years_sorted <- sort(unique(ilec$Observation_Year))
+test_years <- tail(years_sorted, 2)
+is_test <- ilec$Observation_Year %in% test_years
+dt_train <- ilec[!is_test, , drop = FALSE]
+dt_test <- ilec[ is_test, , drop = FALSE]
+```
+
 ```{r feature engineering}
-ilec <- gen_features(ilec)
+age_coefs <- attr(poly(dt_train$Attained_Age, 3), "coefs")
+entry_age_coefs <- attr(poly(dt_train$Issue_Age, 3), "coefs")
+
+dt_train <- gen_features(dt_train, age_coefs, entry_age_coefs)
+dt_test <- gen_features(dt_test, age_coefs, entry_age_coefs)
 ```
 
 # Basic GLM {.tabset}
@@ -142,9 +154,9 @@ ilec <- gen_features(ilec)
 f <- list()
 f$age_fit <- stats::as.formula(
   Death_Count ~ 
-    (agepoly1 + agepoly2 + agepoly3 + agespline2 + agespline3 + agespline4)
+    (agepoly1 + agepoly2 + agepoly3 + agespline2 + agespline3 + agespline4 + Observation_Year)
 )
-glm_age_fit <- glm(as.formula(f$age_fit), ilec, family = "poisson", offset = log(Policies_Exposed))
+glm_age_fit <- glm(as.formula(f$age_fit), dt_train, family = "poisson", offset = log(Policies_Exposed))
 ```
 
 ## Age model
@@ -158,14 +170,15 @@ DT::datatable(
 ```
 
 ```{r add pred}
-ilec[, c("age_pred") := predict(glm_age_fit, ilec, newoffset = ilec$Policies_Exposed) %>% exp]
+dt_train[, c("age_pred") := predict(glm_age_fit, dt_train, newoffset = dt_train$Policies_Exposed) %>% exp]
+dt_test[, c("age_pred") := predict(glm_age_fit, dt_test, newoffset = dt_test$Policies_Exposed) %>% exp]
 ```
 
 ```{r GLM basic}
 f$basic <- stats::as.formula(
-  Death_Count ~ (Sex * Smoker_Status + Face_Amount_Band + Preferred_Indicator + Issue_Agepoly1 + Issue_Agepoly2 + Duration + invDur + dur_sq + dur_cube)
+  Death_Count ~ (Sex * Smoker_Status + Face_Amount_Band + Issue_Agepoly1 + Issue_Agepoly2 + Duration + invDur + dur_sq + dur_cube + Observation_Year)
   )
-glm_basic <- glm(as.formula(f$basic), ilec, family = "poisson", offset = log(age_pred))
+glm_basic <- glm(as.formula(f$basic), dt_train, family = "poisson", offset = log(age_pred))
 ```
 
 ## Stacked basic model
@@ -179,13 +192,14 @@ DT::datatable(
 ```
 
 ```{r add age model pred}
-ilec[, c("basic_pred") := predict(glm_basic, ilec, newoffset = ilec$age_pred) %>% exp]
+dt_train[, c("basic_pred") := predict(glm_basic, dt_train, newoffset = dt_train$age_pred) %>% exp]
+dt_test[, c("basic_pred") := predict(glm_basic, dt_test, newoffset = dt_test$age_pred) %>% exp]
 ```
 
 # Visuals of model fit {.tabset}
+- Visuals on the test data (calendar years 2018-2019)
 
 ## Age model {.tabset}
-- Note the attained_age pattern is likely due to differences in experience for products that record "age last birthday" versus products that record "age nearest birthday". <br>
 
 ```{r }
 ae_plots  <- setNames(vector("list", length(group_cols)), group_cols)
@@ -194,7 +208,7 @@ pred_col   <- "age_pred"
 
 ae_plots <- setNames(
   lapply(group_cols, function(gc) {
-    summ <- ae_summary_by(ilec, gc)
+    summ <- ae_summary_by(dt_test, gc)
     ae_plot(summ, gc, top_n = 50)
   }),
   group_cols
@@ -216,7 +230,7 @@ pred_col   <- "basic_pred"
 
 ae_plots <- setNames(
   lapply(group_cols, function(gc) {
-    summ <- ae_summary_by(ilec, gc)
+    summ <- ae_summary_by(dt_test, gc)
     ae_plot(summ, gc, top_n = 50)
   }),
   group_cols
