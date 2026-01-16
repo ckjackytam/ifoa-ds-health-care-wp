@@ -4,6 +4,7 @@ author: "Michiel Luteijn"
 date: '2025-12-16'
 output:
   html_document:
+    theme: cosmo
     toc: yes
     toc_float: yes
     code_folding: hide
@@ -36,7 +37,7 @@ Description: Achieving the best of both worlds with explainable machine learning
 - Dec 19th - decided the range for issueAge should be 18-80 <br>
 - Dec 19th - decided the range for Attained_Age should be 18-90 <br>
 - Dec 19th - No exclusions made based on combinations of SOA_Guar_Lvl_TP and duration (for now), or Face_Amount_Band <br>
-- Jan 9th - decided the cap duration at 20 due to concerns about data quality at (very) high durations and low volumes of data
+- Jan 9th - decided the cap duration at 20 due to concerns about data quality at (very) high durations and low volumes of data <br>
 - Jan 13th - decided the exclude unknown smoking status
 
 
@@ -45,7 +46,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 ```{r package install, results=FALSE, message=FALSE, warning=FALSE, include = F}
-packages <- c("data.table", "dplyr", "ggplot2", "magrittr", "purrr", "knitr", "stringr", "plyr", "htmlTable", "lme4", "statmod", "glmnet", "splines", "MASS", "rms", "caret", "foreach", "parallel", "readr", "arrow", "doSNOW", "here", "htmltools", "plotly")
+packages <- c("data.table", "dplyr", "ggplot2", "magrittr", "purrr", "knitr", "stringr", "plyr", "htmlTable", "lme4", "statmod", "glmnet", "splines", "MASS", "rms", "caret", "foreach", "parallel", "readr", "arrow", "doSNOW", "here", "htmltools", "plotly", "xgboost", "SHAPforxgboost")
 
 for (pkg in packages){
   if(!pkg %in% rownames(installed.packages())){
@@ -57,6 +58,10 @@ quietly(lapply(packages, library, character.only = T)) %>% suppressWarnings()
 
 rm(packages, pkg)
 quietly(gc())
+```
+
+```{r, include=FALSE, echo=FALSE}
+set.seed(1234)
 ```
 
 ```{r, include=FALSE, echo=FALSE}
@@ -248,7 +253,175 @@ for(i in 1:length(ae_plots)){
 }
 ```
 
-# Build light GBM to probe the GLM fit for deficiencies
+# Build XGBoost to probe the GLM fit for deficiencies {.tabset}
+- For the XGBoost, 2017 is used as test data, whilst 2012-2016 are train data <br>
+
+## Model Fitting
+```{r XGBoost}
+feature_cols <- names(dt_train)[1:8]
+
+# Train/validation split (same as your year-based split)
+dt_tr <- dt_train[Observation_Year != 2017]
+dt_va <- dt_train[Observation_Year == 2017]
+
+# Targets and offsets
+y_tr <- dt_tr[["Death_Count"]]
+y_va <- dt_va[["Death_Count"]]
+offset_tr <- log(dt_tr[["basic_pred"]])
+offset_va <- log(dt_va[["basic_pred"]])
+
+# Build a formula for the selected features
+f$XGBoost <- as.formula(paste("~", paste(feature_cols, collapse = " + ")))
+
+# One-hot encode
+X_tr <- onehot_encode(dt_tr[, 1:8], f$XGBoost)
+X_va <- onehot_encode(dt_va[, 1:8], f$XGBoost)
+
+# DMatrices
+dtrain <- xgb.DMatrix(data = X_tr, label = y_tr)
+setinfo(dtrain, "base_margin", offset_tr)
+
+dvalid <- xgb.DMatrix(data = X_va, label = y_va)
+setinfo(dvalid, "base_margin", offset_va)
+
+params <- list(
+  objective = "count:poisson",
+  eval_metric = "poisson-nloglik",
+  eta = 0.1,
+  max_depth = 2,
+  subsample = 0.8,
+  colsample_bytree = 0.8,
+  min_child_weight = 100
+  )
+
+evals_list <- list(train = dtrain, validation = dvalid)
+
+xgb_model <- xgb.train(
+  params = params,
+  data = dtrain,
+  nrounds = 2000,
+  evals = evals_list,
+  early_stopping_rounds = 20,
+  print_every_n = 10,
+  verbose = 0
+  )
+```
+
+## SHAP Feature Importance
+```{r SHAP_importance}
+shap_vals <- shap.values(xgb_model, X_va)
+
+shap_importance <- data.frame(
+  Feature = names(shap_vals$mean_shap_score),
+  MeanAbsSHAP = shap_vals$mean_shap_score %>% round(4)
+) %>% data.table
+
+shap_importance <- shap_importance[order(-shap_importance$MeanAbsSHAP), ]
+DT::datatable(shap_importance)
+```
+
+## SHAP Beeswarm Plot
+```{r shap_summary, fig.width=10, fig.height=8}
+shap_long <- SHAPforxgboost::shap.prep(
+  shap_contrib = shap_vals$shap_score,
+  X_train = X_va
+)
+
+SHAPforxgboost::shap.plot.summary(shap_long)
+```
+
+## SHAP Dependence Plots{.tabset}
+```{r SHAP dependence, results='asis', echo = F, message = F, warning = F}
+sub_idx <- sample(unique(shap_long$ID), size = 2000)
+toPlot <- shap_importance[Feature != "(Intercept)"]$Feature
+N_features <- pmin(length(toPlot), 10)
+
+for(feature in toPlot[1:N_features]){
+  cat(paste0("### ", feature," \n\n"))
+  
+  plot <- shap.plot.dependence(
+    shap_long[ID %in% sub_idx],
+    X = X_va[sub_idx,],
+    x = feature,
+    color_feature = feature_cols[2]
+  )
+  
+  plot <- plot + 
+    scale_y_log10(
+      labels = function(x) round(exp(x), 4),
+      name = "exp(SHAP value), A/E equivalent"
+    )
+  feature_values <- X_va[sub_idx, feature, with = FALSE] %>% unlist
+  if(length(unique(feature_values)) == 2 && all(feature_values %in% c(0, 1, TRUE, FALSE))) {
+    plot <- plot + 
+      scale_x_continuous(
+        breaks = c(0, 1),
+        labels = c("FALSE", "TRUE")
+      )
+  }
+  
+  plotly_obj <- ggplotly(plot)
+  print(htmltools::tagList(plotly_obj))
+  cat('\n\n')
+}
+```
+
+## SHAP Interaction Analysis
+```{r shap_interactions, fig.width=12, fig.height=10}
+
+```
+
+## Interaction Heatmap
+```{r SHAP dependence interactions, results='asis', echo = F, message = F, warning = F}
+# Create interaction matrix (approximation)
+#if (length(top_features_interact) >= 2) {
+#  # Calculate pairwise SHAP interaction strengths
+#  interaction_matrix <- matrix(0, 
+ #                               nrow = length(top_features_interact), 
+#                                ncol = length(top_features_interact))
+#  rownames(interaction_matrix) <- top_features_interact
+#  colnames(interaction_matrix) <- top_features_interact
+  
+#  for (i in 1:length(top_features_interact)) {
+#    for (j in 1:length(top_features_interact)) {
+#      if (i != j) {
+#        # Correlation of SHAP values as proxy for interaction
+#        interaction_matrix[i, j] <- abs(cor(
+#          shap_values$shap_score[, top_features_interact[i]],
+#          shap_values$shap_score[, top_features_interact[j]]
+#        ))
+#      }
+#    }
+#  }
+  
+  # Plot heatmap
+#  library(reshape2)
+#  melted_matrix <- melt(interaction_matrix)
+  
+#  ggplot(melted_matrix, aes(x = Var1, y = Var2, fill = value)) +
+#    geom_tile() +
+#    geom_text(aes(label = round(value, 2)), size = 3) +
+#    scale_fill_gradient2(low = "white", high = "red", mid = "yellow", 
+#                         midpoint = 0.5, limit = c(0, 1)) +
+#    theme_minimal() +
+#    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+#    labs(
+#      title = "SHAP Value Correlation Matrix (Interaction Proxy)",
+#      subtitle = "Identifying potential interaction terms missing from GLM_basic",
+#      x = "", y = "", fill = "Abs Correlation"
+#    )
+#}
+```
+
+## Model Comparison
+```{r lgbm_comparison}
+
+```
+
+## Key Insights
+```{r insights}
+
+```
 
 # Evaluate model performance
 ``` {r, results = 'asis', echo = F}
