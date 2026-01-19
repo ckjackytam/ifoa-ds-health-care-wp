@@ -112,7 +112,7 @@ ilec <- log_detailed_summary(ilec, quote(Attained_Age <= 90), reason = "Removed 
 ilec <- log_detailed_summary(ilec, quote(Issue_Age >= 18), reason = "Removed Issue_Age below 18")
 ilec <- log_detailed_summary(ilec, quote(Issue_Age <= 80), reason = "Removed Issue_Age above 80")
 ilec <- log_detailed_summary(ilec, quote(Duration <= 20), reason = "Removed duration above 20")
-ilec <- log_detailed_summary(ilec, quote(Insurance_Plan == "Term"), reason = "Term policies only")
+#ilec <- log_detailed_summary(ilec, quote(Insurance_Plan == "Term"), reason = "Term policies only") # Already taken out by pre-processing
 ilec <- log_detailed_summary(ilec, quote(Smoker_Status != "U"), reason = "Removed unknown smoking status")
 
 DT::datatable(attributes(ilec)$filter_summary)
@@ -174,8 +174,8 @@ dt_train <- gen_features(dt_train, age_coefs, entry_age_coefs, obs_year_coefs)
 dt_test <- gen_features(dt_test, age_coefs, entry_age_coefs, obs_year_coefs)
 ```
 
-# Basic GLM {.tabset}
-- First build age only. The age only model will be the offset for models downstream to allow for better interpretation of regression coefficients. 
+# Two-step GLM {.tabset}
+- This model is offset by the age model (i.e. it uses the age model as a baseline to further refine). 
 
 ```{r GLM}
 f <- list()
@@ -201,17 +201,17 @@ dt_train[, c("age_pred") := predict(glm_age_fit, dt_train, newoffset = dt_train$
 dt_test[, c("age_pred") := predict(glm_age_fit, dt_test, newoffset = dt_test$Policies_Exposed) %>% exp]
 ```
 
-```{r GLM basic}
-f$basic <- stats::as.formula(
+```{r GLM twostep}
+f$twostep <- stats::as.formula(
   Death_Count ~ (Sex * Smoker_Status + Face_Amount_Band + issue_agepoly1 + issue_agepoly2 + Duration + invDur + dur_sq + dur_cube + obs_yearpoly1 + obs_yearpoly2)
   )
-glm_basic <- glm(as.formula(f$basic), dt_train, family = "poisson", offset = log(age_pred))
+glm_twostep <- glm(as.formula(f$twostep), dt_train, family = "poisson", offset = log(age_pred))
 ```
 
-## Stacked basic model
+## Two-step model
 ```{r }
 DT::datatable(
-  glm_rr_table(glm_basic),
+  glm_rr_table(glm_twostep),
   rownames = FALSE,
   extensions = "Buttons",
   options = glm_dt_options()
@@ -219,8 +219,30 @@ DT::datatable(
 ```
 
 ```{r add age model pred}
-dt_train[, c("basic_pred") := predict(glm_basic, dt_train, newoffset = dt_train$age_pred) %>% exp]
-dt_test[, c("basic_pred") := predict(glm_basic, dt_test, newoffset = dt_test$age_pred) %>% exp]
+dt_train[, c("twostep_pred") := predict(glm_twostep, dt_train, newoffset = dt_train$age_pred) %>% exp]
+dt_test[, c("twostep_pred") := predict(glm_twostep, dt_test, newoffset = dt_test$age_pred) %>% exp]
+```
+
+```{r GLM combined}
+f$combined <- stats::as.formula(
+  Death_Count ~ (agepoly1 + agepoly2 + agepoly3 + agespline2 + agespline3 + agespline4 + Sex * Smoker_Status + Face_Amount_Band + issue_agepoly1 + issue_agepoly2 + Duration + invDur + dur_sq + dur_cube + obs_yearpoly1 + obs_yearpoly2)
+  )
+glm_combined <- glm(as.formula(f$combined), dt_train, family = "poisson", offset = log(Policies_Exposed))
+```
+
+## Combined model
+```{r }
+DT::datatable(
+  glm_rr_table(glm_combined),
+  rownames = FALSE,
+  extensions = "Buttons",
+  options = glm_dt_options()
+) %>% glm_dt_format()
+```
+
+```{r add combined model pred}
+dt_train[, c("combined_pred") := predict(glm_combined, dt_train, newoffset = dt_train$Policies_Exposed) %>% exp]
+dt_test[, c("combined_pred") := predict(glm_combined, dt_test, newoffset = dt_test$Policies_Exposed) %>% exp]
 ```
 
 # Visuals of GLM fit on test data {.tabset}
@@ -250,11 +272,33 @@ for(i in 1:length(ae_plots)){
 }
 ```
 
-## Basic GLM {.tabset}
+## Two-step GLM {.tabset}
 
 ```{r }
 ae_plots  <- setNames(vector("list", length(group_cols)), group_cols)
-pred_col   <- "basic_pred"
+pred_col   <- "twostep_pred"
+
+ae_plots <- setNames(
+  lapply(group_cols, function(gc) {
+    summ <- ae_summary_by(dt_test, gc)
+    ae_plot(summ, gc, top_n = 50)
+  }),
+  group_cols
+)
+```
+
+``` {r, results = 'asis', echo = F}
+for(i in 1:length(ae_plots)){
+  cat(paste0("### ", names(ae_plots)[i]," \n"))
+  print(htmltools::tagList(plotly::ggplotly(ae_plots[[i]])))
+}
+```
+
+## Combined GLM {.tabset}
+
+```{r }
+ae_plots  <- setNames(vector("list", length(group_cols)), group_cols)
+pred_col   <- "combined_pred"
 
 ae_plots <- setNames(
   lapply(group_cols, function(gc) {
@@ -286,8 +330,8 @@ dt_va <- dt_train[Observation_Year == 2017]
 # Targets and offsets
 y_tr <- dt_tr[["Death_Count"]]
 y_va <- dt_va[["Death_Count"]]
-offset_tr <- log(dt_tr[["basic_pred"]])
-offset_va <- log(dt_va[["basic_pred"]])
+offset_tr <- log(dt_tr[["twostep_pred"]])
+offset_va <- log(dt_va[["twostep_pred"]])
 
 # Build a formula for the selected features
 f$XGBoost <- as.formula(paste("~", paste(feature_cols, collapse = " + ")))
@@ -443,8 +487,8 @@ for(feature in toPlot[1:N_features]){
 ```
 
 # Evaluate model performance
-- Metric: mean Poisson deviance, weighted by expected prediction. <br>
-- Mean Poisson deviance (without weighting) shows test data outperforming train data (probably due to fewer deaths per exposure / higher share of zero counts in test data)
+- Metric: mean Poisson deviance, weighted by expected prediction (i.e. Poisson deviance per predicted claim). <br>
+- Mean Poisson deviance per row shows test data outperforming train data (probably due to fewer deaths per exposure / higher share of zero counts in test data).
 
 ``` {r, results = 'asis', echo = F}
 dev_term <- stats::poisson()$dev.resids
@@ -454,9 +498,13 @@ models <- list(
     train_pred = dt_train$age_pred, 
     test_pred = dt_test$age_pred
   ),
-  GLM_basic = list(
-    train_pred = dt_train$basic_pred, 
-    test_pred = dt_test$basic_pred
+  GLM_twostep = list(
+    train_pred = dt_train$twostep_pred, 
+    test_pred = dt_test$twostep_pred
+  ),
+  GLM_combined = list(
+    train_pred = dt_train$combined_pred, 
+    test_pred = dt_test$combined_pred
   )
 )
 
