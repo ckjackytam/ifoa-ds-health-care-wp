@@ -99,9 +99,10 @@ if(!file.exists(here::here(fpath))){
     }
 ```
 
-# Data filtering
-- AtoEs based on SOA-supplied ExpDth_VBT2015wMI_Cnt that came with the dataset.
-- For age nearest birthday, half a year is subtracted from AttainedAge prior to AttainedAge filters
+# Data filtering {.tabset}
+
+## Filtering
+- AtoEs based on SOA-supplied ExpDth_VBT2015wMI_Cnt that came with the dataset. <br>
 
 ```{r Data filters}
 ilec <- log_detailed_summary(ilec, quote(!Policies_Exposed == 0), reason = "Taking out zero exposure fields")
@@ -115,6 +116,23 @@ ilec <- log_detailed_summary(ilec, quote(Smoker_Status != "U"), reason = "Remove
 
 DT::datatable(attributes(ilec)$filter_summary)
 ```
+
+## Remaining
+- AtoEs based on SOA-supplied ExpDth_VBT2015wMI_Cnt that came with the dataset. <br>
+
+```{r Data remaining}
+summary <- 
+  ilec[, list(
+    Deaths = sum(Death_Count),
+    Claim_Amounts_Bn = (sum(Death_Claim_Amount)/1000000000) %>% round(4),
+    Exposure_years_Mln = (sum(Policies_Exposed)/1000000) %>% round(4),
+    Avg_claim = (sum(Death_Claim_Amount)/sum(Death_Count)) %>% round(-3),
+    AtoE_lives = (sum(Death_Count)/sum(ExpDth_VBT2015wMI_Cnt)) %>% round(4) * 100
+  )]
+
+DT::datatable(summary)
+```
+
 
 ```{r aggregate to speed up analytics}
 group_cols <- c("Observation_Year", "Sex", "Smoker_Status", "Issue_Age", "Duration", "Face_Amount_Band", "Issue_Year", "Attained_Age")
@@ -208,7 +226,7 @@ dt_test[, c("basic_pred") := predict(glm_basic, dt_test, newoffset = dt_test$age
 - Visuals on the test data (calendar years 2018-2019)
 
 ## Age model {.tabset}
-- Note AtoEs are low since experience is lighter in 2018-2019, then prior observation years which is not accounted for in the age model <br>.
+- Note AtoEs are low since experience is lighter in 2018-2019, than in prior observation years which is not accounted for in the age model. <br>
 
 ```{r }
 ae_plots  <- setNames(vector("list", length(group_cols)), group_cols)
