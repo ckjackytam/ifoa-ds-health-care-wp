@@ -112,6 +112,7 @@ ilec <- log_detailed_summary(ilec, quote(Attained_Age <= 90), reason = "Removed 
 ilec <- log_detailed_summary(ilec, quote(Issue_Age >= 18), reason = "Removed Issue_Age below 18")
 ilec <- log_detailed_summary(ilec, quote(Issue_Age <= 80), reason = "Removed Issue_Age above 80")
 ilec <- log_detailed_summary(ilec, quote(Duration <= 20), reason = "Removed duration above 20")
+ilec <- log_detailed_summary(ilec, quote(Insurance_Plan == "Term"), reason = "Term policies only")
 ilec <- log_detailed_summary(ilec, quote(Smoker_Status != "U"), reason = "Removed unknown smoking status")
 
 DT::datatable(attributes(ilec)$filter_summary)
