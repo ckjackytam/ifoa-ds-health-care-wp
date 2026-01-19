@@ -443,7 +443,12 @@ for(feature in toPlot[1:N_features]){
 ```
 
 # Evaluate model performance
+- Metric: mean Poisson deviance, weighted by expected prediction. <br>
+- Mean Poisson deviance (without weighting) shows test data outperforming train data (probably due to fewer deaths per exposure / higher share of zero counts in test data)
+
 ``` {r, results = 'asis', echo = F}
+dev_term <- stats::poisson()$dev.resids
+
 models <- list(
   GLM_age   = list(
     train_pred = dt_train$age_pred, 
@@ -457,10 +462,11 @@ models <- list(
 
 comparison <- imap_dfr(models, ~ data.table::data.table(
   Model             = .y,
-  Poisson_dev_train = poisson_dev(dt_train$Death_Count, .x$train_pred),
-  Poisson_dev_test  = poisson_dev(dt_test$Death_Count, .x$test_pred)
+  Poisson_dev_train = mean(dev_term(dt_train$Death_Count, .x$train_pred, wt = .x$train_pred)),
+  Poisson_dev_test = mean(dev_term(dt_test$Death_Count, .x$test_pred, wt = .x$test_pred))
 ))
 
 DT::datatable(comparison) |>
   DT::formatRound(columns = c("Poisson_dev_train", "Poisson_dev_test"), digits = 4)
 ```
+
