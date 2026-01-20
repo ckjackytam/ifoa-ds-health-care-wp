@@ -174,63 +174,16 @@ dt_train <- gen_features(dt_train, age_coefs, entry_age_coefs, obs_year_coefs)
 dt_test <- gen_features(dt_test, age_coefs, entry_age_coefs, obs_year_coefs)
 ```
 
-# Two-step GLM {.tabset}
-- This model is offset by the age model (i.e. it uses the age model as a baseline to further refine). 
-
-```{r GLM}
-f <- list()
-f$age_fit <- stats::as.formula(
-  Death_Count ~ 
-    (agepoly1 + agepoly2 + agepoly3 + agespline2 + agespline3 + agespline4)
-)
-glm_age_fit <- glm(as.formula(f$age_fit), dt_train, family = "poisson", offset = log(Policies_Exposed))
-```
-
-## Age model
-```{r }
-DT::datatable(
-  glm_rr_table(glm_age_fit),
-  rownames = FALSE,
-  extensions = "Buttons",
-  options = glm_dt_options()
-) %>% glm_dt_format()
-```
-
-```{r add pred}
-dt_train[, c("age_pred") := predict(glm_age_fit, dt_train, newoffset = dt_train$Policies_Exposed) %>% exp]
-dt_test[, c("age_pred") := predict(glm_age_fit, dt_test, newoffset = dt_test$Policies_Exposed) %>% exp]
-```
-
-```{r GLM twostep}
-f$twostep <- stats::as.formula(
-  Death_Count ~ (Sex * Smoker_Status + Face_Amount_Band + issue_agepoly1 + issue_agepoly2 + Duration + invDur + dur_sq + dur_cube + obs_yearpoly1 + obs_yearpoly2)
-  )
-glm_twostep <- glm(as.formula(f$twostep), dt_train, family = "poisson", offset = log(age_pred))
-```
-
-## Two-step model
-```{r }
-DT::datatable(
-  glm_rr_table(glm_twostep),
-  rownames = FALSE,
-  extensions = "Buttons",
-  options = glm_dt_options()
-) %>% glm_dt_format()
-```
-
-```{r add age model pred}
-dt_train[, c("twostep_pred") := predict(glm_twostep, dt_train, newoffset = dt_train$age_pred) %>% exp]
-dt_test[, c("twostep_pred") := predict(glm_twostep, dt_test, newoffset = dt_test$age_pred) %>% exp]
-```
 
 ```{r GLM combined}
+f <- list()
 f$combined <- stats::as.formula(
   Death_Count ~ (agepoly1 + agepoly2 + agepoly3 + agespline2 + agespline3 + agespline4 + Sex * Smoker_Status + Face_Amount_Band + issue_agepoly1 + issue_agepoly2 + Duration + invDur + dur_sq + dur_cube + obs_yearpoly1 + obs_yearpoly2)
   )
 glm_combined <- glm(as.formula(f$combined), dt_train, family = "poisson", offset = log(Policies_Exposed))
 ```
 
-## Combined model
+## Baseline model
 ```{r }
 DT::datatable(
   glm_rr_table(glm_combined),
@@ -245,59 +198,36 @@ dt_train[, c("combined_pred") := predict(glm_combined, dt_train, newoffset = dt_
 dt_test[, c("combined_pred") := predict(glm_combined, dt_test, newoffset = dt_test$Policies_Exposed) %>% exp]
 ```
 
-# Visuals of GLM fit on test data {.tabset}
-- Visuals on the test data (calendar years 2018-2019)
+# Visuals of baseline GLM fit {.tabset}
 
-## Age model {.tabset}
-- Note AtoEs are low since experience is lighter in 2018-2019, than in prior observation years which is not accounted for in the age model. <br>
+## Train data {.tabset}
+- Visuals on the train data (calendar years 2012-2017)
 
 ```{r }
 ae_plots  <- setNames(vector("list", length(group_cols)), group_cols)
 actual_col <- "Death_Count"
-pred_col   <- "age_pred"
-
-ae_plots <- setNames(
-  lapply(group_cols, function(gc) {
-    summ <- ae_summary_by(dt_test, gc)
-    ae_plot(summ, gc, top_n = 50)
-  }),
-  group_cols
-)
-```
-
-``` {r, results = 'asis', echo = F}
-for(i in 1:length(ae_plots)){
-  cat(paste0("### ", names(ae_plots)[i]," \n"))
-  print(htmltools::tagList(plotly::ggplotly(ae_plots[[i]])))
-}
-```
-
-## Two-step GLM {.tabset}
-
-```{r }
-pred_col   <- "twostep_pred"
-
-ae_plots <- setNames(
-  lapply(group_cols, function(gc) {
-    summ <- ae_summary_by(dt_test, gc)
-    ae_plot(summ, gc, top_n = 50)
-  }),
-  group_cols
-)
-```
-
-``` {r, results = 'asis', echo = F}
-for(i in 1:length(ae_plots)){
-  cat(paste0("### ", names(ae_plots)[i]," \n"))
-  print(htmltools::tagList(plotly::ggplotly(ae_plots[[i]])))
-}
-```
-
-## Combined GLM {.tabset}
-
-```{r }
 pred_col   <- "combined_pred"
 
+ae_plots <- setNames(
+  lapply(group_cols, function(gc) {
+    summ <- ae_summary_by(dt_train, gc)
+    ae_plot(summ, gc, top_n = 50)
+  }),
+  group_cols
+)
+```
+
+``` {r, results = 'asis', echo = F}
+for(i in 1:length(ae_plots)){
+  cat(paste0("### ", names(ae_plots)[i]," \n"))
+  print(htmltools::tagList(plotly::ggplotly(ae_plots[[i]])))
+}
+```
+
+## Test data {.tabset}
+- Visuals on the test data (calendar years 2018-2019)
+
+```{r }
 ae_plots <- setNames(
   lapply(group_cols, function(gc) {
     summ <- ae_summary_by(dt_test, gc)
@@ -500,14 +430,6 @@ for(feature in toPlot[1:N_features]){
 dev_term <- stats::poisson()$dev.resids
 
 models <- list(
-  GLM_age   = list(
-    train_pred = dt_train$age_pred, 
-    test_pred = dt_test$age_pred
-  ),
-  GLM_twostep = list(
-    train_pred = dt_train$twostep_pred, 
-    test_pred = dt_test$twostep_pred
-  ),
   GLM_combined = list(
     train_pred = dt_train$combined_pred, 
     test_pred = dt_test$combined_pred
