@@ -275,7 +275,6 @@ for(i in 1:length(ae_plots)){
 ## Two-step GLM {.tabset}
 
 ```{r }
-ae_plots  <- setNames(vector("list", length(group_cols)), group_cols)
 pred_col   <- "twostep_pred"
 
 ae_plots <- setNames(
@@ -297,7 +296,6 @@ for(i in 1:length(ae_plots)){
 ## Combined GLM {.tabset}
 
 ```{r }
-ae_plots  <- setNames(vector("list", length(group_cols)), group_cols)
 pred_col   <- "combined_pred"
 
 ae_plots <- setNames(
@@ -318,6 +316,8 @@ for(i in 1:length(ae_plots)){
 
 # Build XGBoost to probe the GLM fit for deficiencies {.tabset}
 - For the XGBoost, 2017 is used as test data, whilst 2012-2016 are train data <br>
+- The baseline here (i.e. model being evaluated) is the GLM_combined model <br>
+-- This model was selected as a baseline to keep the workflow simple. 
 
 ## Model Fitting
 ```{r XGBoost}
@@ -330,8 +330,8 @@ dt_va <- dt_train[Observation_Year == 2017]
 # Targets and offsets
 y_tr <- dt_tr[["Death_Count"]]
 y_va <- dt_va[["Death_Count"]]
-offset_tr <- log(dt_tr[["twostep_pred"]])
-offset_va <- log(dt_va[["twostep_pred"]])
+offset_tr <- log(dt_tr[["combined_pred"]])
+offset_va <- log(dt_va[["combined_pred"]])
 
 # Build a formula for the selected features
 f$XGBoost <- as.formula(paste("~", paste(feature_cols, collapse = " + ")))
@@ -371,8 +371,10 @@ xgb_model <- xgb.train(
 ```
 
 ## SHAP Feature Importance
+- On training data <br>
+
 ```{r SHAP_importance}
-shap_vals <- shap.values(xgb_model, X_va)
+shap_vals <- shap.values(xgb_model, X_tr)
 
 shap_importance <- data.frame(
   Feature = names(shap_vals$mean_shap_score),
@@ -384,18 +386,22 @@ DT::datatable(shap_importance)
 ```
 
 ## SHAP Beeswarm Plot
+- On training data <br>
+
 ```{r shap_summary, fig.width=10, fig.height=8}
 shap_long <- SHAPforxgboost::shap.prep(
   shap_contrib = shap_vals$shap_score,
-  X_train = X_va
+  X_train = X_tr
 )
 
 SHAPforxgboost::shap.plot.summary(shap_long)
 ```
 
 ## SHAP Dependence Plots{.tabset}
+- On training data <br>
+
 ```{r SHAP dependence, results='asis', echo = F, message = F, warning = F}
-sub_idx <- sample(unique(shap_long$ID), size = 2000)
+sub_idx <- sample(unique(shap_long$ID), size = 2000, prob = dt_tr$Policies_Exposed)
 toPlot <- shap_importance[Feature != "(Intercept)"]$Feature
 N_features <- pmin(length(toPlot), 10)
 
@@ -404,17 +410,17 @@ for(feature in toPlot[1:N_features]){
   
   plot <- shap.plot.dependence(
     shap_long[ID %in% sub_idx],
-    X = X_va[sub_idx,],
+    X = X_tr[sub_idx,],
     x = feature,
     color_feature = feature_cols[2]
   )
   
-  plot <- plot + 
-    scale_y_log10(
-      labels = function(x) round(exp(x), 4),
-      name = "exp(SHAP value), A/E equivalent"
-    )
-  feature_values <- X_va[sub_idx, feature, with = FALSE] %>% unlist
+#  plot <- plot + 
+#    scale_y_log10(
+#      labels = function(x) round(exp(x), 4),
+#      name = "exp(SHAP value), A/E equivalent"
+#    )
+  feature_values <- X_tr[sub_idx, feature, with = FALSE] %>% unlist
   if(length(unique(feature_values)) == 2 && all(feature_values %in% c(0, 1, TRUE, FALSE))) {
     plot <- plot + 
       scale_x_continuous(
