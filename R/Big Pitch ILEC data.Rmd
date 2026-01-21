@@ -250,7 +250,7 @@ for(i in 1:length(ae_plots)){
 -- This model was selected as a baseline to keep the workflow simple. 
 
 ## Model Fitting
-```{r XGBoost}
+```{r XGBoost, include = FALSE}
 feature_cols <- names(dt_train)[1:8]
 
 # Train/validation split (same as your year-based split)
@@ -264,7 +264,8 @@ offset_tr <- log(dt_tr[["combined_pred"]])
 offset_va <- log(dt_va[["combined_pred"]])
 
 # Build a formula for the selected features
-f$XGBoost <- as.formula(paste("~", paste(feature_cols, collapse = " + ")))
+f$XGBoost <- as.formula(
+  paste("~", paste(feature_cols, collapse = " + "), "- 1"))
 
 # One-hot encode
 X_tr <- onehot_encode(dt_tr[, 1:8], f$XGBoost)
@@ -334,10 +335,9 @@ SHAPforxgboost::shap.plot.summary(shap_long)
 
 ```{r SHAP dependence, results='asis', echo = F, message = F, warning = F}
 sub_idx <- sample(unique(shap_long$ID), size = 2000, prob = dt_tr$Policies_Exposed)
-toPlot <- shap_importance[Feature != "(Intercept)"]$Feature
-N_features <- pmin(length(toPlot), 10)
+N_features <- pmin(nrow(shap_importance), 10)
 
-for(feature in toPlot[1:N_features]){
+for(feature in shap_importance$Feature[1:N_features]){
   cat(paste0("### ", feature," \n\n"))
   
   plot <- shap.plot.dependence(
