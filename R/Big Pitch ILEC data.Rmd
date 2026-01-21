@@ -305,13 +305,15 @@ xgb_model <- xgb.train(
 
 ```{r SHAP_importance}
 shap_vals <- shap.values(xgb_model, X_tr)
+exposure_weights <- exp(offset_tr)
 
 shap_importance <- data.frame(
-  Feature = names(shap_vals$mean_shap_score),
-  MeanAbsSHAP = shap_vals$mean_shap_score %>% round(4)
+  Feature = colnames(shap_vals$shap_score),
+  MeanAbsSHAP = apply(shap_vals$shap_score, 2, function(x) mean(abs(x))) %>% round(4),
+  MeanAbsWeightedSHAP = apply(shap_vals$shap_score, 2, function(x) weighted.mean(abs(x), exposure_weights)) %>% round(4)
 ) %>% data.table
 
-shap_importance <- shap_importance[order(-shap_importance$MeanAbsSHAP), ]
+shap_importance <- shap_importance[order(-shap_importance$MeanAbsWeightedSHAP), ]
 DT::datatable(shap_importance)
 ```
 
@@ -423,8 +425,16 @@ for(feature in toPlot[1:N_features]){
 ```
 
 # Evaluate model performance
-- Metric: mean Poisson deviance, weighted by expected prediction (i.e. Poisson deviance per predicted claim). <br>
-- Mean Poisson deviance per row shows test data outperforming train data (probably due to fewer deaths per exposure / higher share of zero counts in test data).
+- Poisson deviance is the correct metric, however standardisation is required in order to compare train and test data performance. <br>
+-- Average Poisson deviance is incorrect since exposure per row ranges from a single day to 5,502 years. <br> <br>
+
+<b>Metrics</b>
+-- <b>Preferred Metric</b>: mean Poisson deviance, weighted by predicted claims (i.e. Poisson deviance per predicted claim). <br>
+--- Some concerns around circularity (i.e. the model decides weights), but in practise prediction differences between models will be in the order of 1-10%. <br>
+-- Metric: mean Poisson deviance, weighted by life year exposure (i.e. Poisson deviance per predicted claim). <br>
+--- Downside is that low risk life years (e.g. 20 year olds) given the same weight as high risk life years (e.g. 80 year olds) <br>
+-- Metric: mean Poisson deviance, weighted by actual claims (i.e. Poisson deviance per predicted claim). <br>
+--- Downside is that entries without claims are ignored, so this metric does not protect well against overprediction of claims. <br><br>
 
 ``` {r, results = 'asis', echo = F}
 dev_term <- stats::poisson()$dev.resids
@@ -438,11 +448,15 @@ models <- list(
 
 comparison <- imap_dfr(models, ~ data.table::data.table(
   Model             = .y,
-  Poisson_dev_train = mean(dev_term(dt_train$Death_Count, .x$train_pred, wt = .x$train_pred)),
-  Poisson_dev_test = mean(dev_term(dt_test$Death_Count, .x$test_pred, wt = .x$test_pred))
+  Poisdev_train_wpred = mean(dev_term(dt_train$Death_Count, .x$train_pred, wt = .x$train_pred)),
+  Poisdev_test_wpred = mean(dev_term(dt_test$Death_Count, .x$test_pred, wt = .x$test_pred)),
+  Poisdev_train_wexposure = mean(dev_term(dt_train$Death_Count, .x$train_pred, wt = dt_train$Policies_Exposed)),
+  Poisdev_test_wexposure = mean(dev_term(dt_test$Death_Count, .x$test_pred, wt = dt_test$Policies_Exposed)),
+  Poisdev_train_wclaims = mean(dev_term(dt_train$Death_Count, .x$train_pred, wt = dt_train$Death_Count)),
+  Poisdev_test_wclaims = mean(dev_term(dt_test$Death_Count, .x$test_pred, wt = dt_test$Death_Count))
 ))
 
 DT::datatable(comparison) |>
-  DT::formatRound(columns = c("Poisson_dev_train", "Poisson_dev_test"), digits = 4)
+  DT::formatRound(columns = c("Poisdev_train_wpred", "Poisdev_test_wpred", "Poisdev_train_wexposure", "Poisdev_test_wexposure", "Poisdev_train_wclaims", "Poisdev_test_wclaims"), digits = 4)
 ```
 
