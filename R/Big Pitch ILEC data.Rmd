@@ -64,6 +64,11 @@ quietly(gc())
 set.seed(1234)
 ```
 
+```{r flags, include=FALSE, echo=FALSE}
+test_calendaryear <- FALSE
+```
+
+
 ```{r, include=FALSE, echo=FALSE}
 library(plotly)
 knitr::opts_chunk$set(warning = FALSE)
@@ -158,9 +163,16 @@ for (j in intersect(cols_to_order, names(ilec))) {
 ```
 
 ```{r test train split}
-years_sorted <- sort(unique(ilec$Observation_Year))
-test_years <- tail(years_sorted, 2)
-is_test <- ilec$Observation_Year %in% test_years
+if(isTRUE(test_calendaryear)){
+  years_sorted <- sort(unique(ilec$Observation_Year))
+  test_years <- tail(years_sorted, 2)
+  is_test <- ilec$Observation_Year %in% test_years
+} else {
+  ilec_rows <- nrow(ilec)
+  test_rows <- sample(floor(0.2 * ilec_rows))
+  is_test <- rownames(ilec) %in% test_rows 
+  }
+
 dt_train <- ilec[!is_test, , drop = FALSE]
 dt_test <- ilec[ is_test, , drop = FALSE]
 ```
@@ -251,10 +263,20 @@ for(i in 1:length(ae_plots)){
 
 ## Model Training
 ```{r XGBoost, include = FALSE}
+if(isTRUE(test_calendaryear)){
+  years_sorted <- sort(unique(dt_train$Observation_Year))
+  test_years <- tail(years_sorted, 1)
+  is_validation <- dt_train$Observation_Year %in% test_years
+} else {
+  train_rows <- nrow(dt_train)
+  test_rows <- sample(floor(0.2 * train_rows))
+  is_validation <- rownames(dt_train) %in% test_rows 
+  }
+
 feature_cols <- names(dt_train)[1:8]
 
-dt_tr <- dt_train[Observation_Year != 2017]
-dt_va <- dt_train[Observation_Year == 2017]
+dt_tr <- dt_train[!is_validation,]
+dt_va <- dt_train[is_validation,]
 
 # Targets and offsets
 y_tr <- dt_tr[["Death_Count"]]
