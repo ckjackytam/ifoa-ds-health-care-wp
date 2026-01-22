@@ -65,9 +65,9 @@ set.seed(1234)
 ```
 
 ```{r flags, include=FALSE, echo=FALSE}
-test_calendaryear <- FALSE
+test_calendaryear <- FALSE # Sets test data be calendar years 2018-2019 (TRUE), or 20% random sample (FALSE)
+data_proportion <- FALSE # Set to desired data sample fraction, otherwise FALSE (or 1)
 ```
-
 
 ```{r, include=FALSE, echo=FALSE}
 library(plotly)
@@ -101,7 +101,13 @@ if(!file.exists(here::here(fpath))){
   source("R/read_data_and_save_parquet.R")
   } else {
     ilec <- arrow::read_parquet(here::here(fpath))
-    }
+  }
+```
+
+```{r partial run, include=FALSE}
+if(!isFALSE(data_proportion)){
+  ilec <- ilec[sample.int(.N, .N * data_proportion)]
+  }
 ```
 
 # Data filtering {.tabset}
@@ -169,7 +175,7 @@ if(isTRUE(test_calendaryear)){
   is_test <- ilec$Observation_Year %in% test_years
 } else {
   ilec_rows <- nrow(ilec)
-  test_rows <- sample(floor(0.2 * ilec_rows))
+  test_rows <- sample(ilec_rows, floor(0.2 * ilec_rows))
   is_test <- rownames(ilec) %in% test_rows 
   }
 
@@ -185,7 +191,6 @@ obs_year_coefs <- attr(poly(dt_train$Observation_Year, 3), "coefs")
 dt_train <- gen_features(dt_train, age_coefs, entry_age_coefs, obs_year_coefs)
 dt_test <- gen_features(dt_test, age_coefs, entry_age_coefs, obs_year_coefs)
 ```
-
 
 ```{r GLM baseline}
 f <- list()
@@ -206,19 +211,19 @@ DT::datatable(
 ```
 
 ```{r add baseline model pred}
-dt_train[, c("baseline_pred") := predict(glm_baseline, dt_train, newoffset = dt_train$Policies_Exposed) %>% exp]
-dt_test[, c("baseline_pred") := predict(glm_baseline, dt_test, newoffset = dt_test$Policies_Exposed) %>% exp]
+dt_train[, c("pred_baseline") := predict(glm_baseline, dt_train, newoffset = dt_train$Policies_Exposed) %>% exp]
+dt_test[, c("pred_baseline") := predict(glm_baseline, dt_test, newoffset = dt_test$Policies_Exposed) %>% exp]
 ```
 
 # Visuals of baseline GLM fit {.tabset}
 
 ## Train data {.tabset}
-- Visuals on the train data (calendar years 2012-2017)
+`r if(test_calendaryear) "- Visuals on the train data (calendar years 2012-2017)"`
 
 ```{r }
 ae_plots  <- setNames(vector("list", length(group_cols)), group_cols)
 actual_col <- "Death_Count"
-pred_col   <- "baseline_pred"
+pred_col   <- "pred_baseline"
 
 ae_plots <- setNames(
   lapply(group_cols, function(gc) {
@@ -237,7 +242,7 @@ for(i in 1:length(ae_plots)){
 ```
 
 ## Test data {.tabset}
-- Visuals on the test data (calendar years 2018-2019)
+`r if(test_calendaryear) "- Visuals on the test data (calendar years 2018-2019)"`
 
 ```{r }
 ae_plots <- setNames(
@@ -257,7 +262,7 @@ for(i in 1:length(ae_plots)){
 ```
 
 # Build XGBoost to probe the GLM fit for deficiencies {.tabset}
-- For the XGBoost, 2017 is used as test data, whilst 2012-2016 are train data <br>
+`r if(test_calendaryear) "- For the XGBoost, 2017 is used as test data, whilst 2012-2016 are train data <br>"`
 - The baseline here (i.e. model being evaluated) is the GLM_baseline model <br>
 -- This model was selected as a baseline to keep the workflow simple. 
 
@@ -269,7 +274,7 @@ if(isTRUE(test_calendaryear)){
   is_validation <- dt_train$Observation_Year %in% test_years
 } else {
   train_rows <- nrow(dt_train)
-  test_rows <- sample(floor(0.2 * train_rows))
+  test_rows <- sample(train_rows, floor(0.2 * train_rows))
   is_validation <- rownames(dt_train) %in% test_rows 
   }
 
@@ -281,8 +286,8 @@ dt_va <- dt_train[is_validation,]
 # Targets and offsets
 y_tr <- dt_tr[["Death_Count"]]
 y_va <- dt_va[["Death_Count"]]
-offset_tr <- log(dt_tr[["baseline_pred"]])
-offset_va <- log(dt_va[["baseline_pred"]])
+offset_tr <- log(dt_tr[["pred_baseline"]])
+offset_va <- log(dt_va[["pred_baseline"]])
 
 # Build a formula for the selected features, ex-intercept since we one-hot encode
 f$XGBoost <- as.formula(
@@ -533,6 +538,27 @@ for(k in 1:nrow(top_interactions)) {
 #}
 ```
 
+```{r add xgboost pred, include = FALSE}
+y_train_full <- dt_train[["Death_Count"]]
+y_test <- dt_test[["Death_Count"]]
+offset_tr <- log(dt_train[["pred_baseline"]])
+offset_test <- log(dt_test[["pred_baseline"]])
+
+# One-hot encode
+X_train_full<- onehot_encode(dt_train[, 1:8], f$XGBoost)
+X_test <- onehot_encode(dt_test[, 1:8], f$XGBoost)
+
+# DMatrices
+dtrain_full <- xgb.DMatrix(data = X_train_full, label = y_train_full)
+setinfo(dtrain_full, "base_margin", offset_tr)
+
+dtest <- xgb.DMatrix(data = X_test, label = y_test)
+setinfo(dtest, "base_margin", offset_test)
+
+dt_train[, c("pred_xgboost") := predict(xgb_model, dtrain_full)]
+dt_test[, c("pred_xgboost") := predict(xgb_model, dtest)]
+```
+
 # GLM supplemented with interactions identified by XGBoost
 ```{r GLM interactions}
 interaction_terms <- top_interactions[, {
@@ -542,8 +568,21 @@ interaction_terms <- top_interactions[, {
   feature1_clean <- feature_cols[apply(feat1, 1, which.max)]
   feature2_clean <- feature_cols[apply(feat2, 1, which.max)]
   
-  paste(feature1_clean, feature2_clean, sep = ":")
-  }] %>% unique
+   replacements <- list(
+        Issue_Age = "(issue_agepoly1 + issue_agepoly2)",
+        Attained_Age = "(agepoly1 + agepoly2)",
+        Duration = "(Duration + invDur + dur_sq)"
+    )
+   
+    feature1_expanded <- ifelse(feature1_clean %in% names(replacements),
+                                replacements[feature1_clean],
+                                feature1_clean)
+    feature2_expanded <- ifelse(feature2_clean %in% names(replacements),
+                                replacements[feature2_clean],
+                                feature2_clean)
+    
+    paste(feature1_expanded, feature2_expanded, sep = ":")
+    }] %>% unique
 
 baseline_rhs <- as.character(f$baseline)[3]
 baseline_rhs_clean <- gsub("^\\((.*)\\)$", "\\1", baseline_rhs)
@@ -566,17 +605,17 @@ DT::datatable(
 ```
 
 ```{r add baseline interactions model pred}
-dt_train[, c("baseline_interactions_pred") := predict(glm_baseline_interactions, dt_train, newoffset = dt_train$Policies_Exposed) %>% exp]
-dt_test[, c("baseline_interactions_pred") := predict(glm_baseline_interactions, dt_test, newoffset = dt_test$Policies_Exposed) %>% exp]
+dt_train[, c("pred_baseline_interactions") := predict(glm_baseline_interactions, dt_train, newoffset = dt_train$Policies_Exposed) %>% exp]
+dt_test[, c("pred_baseline_interactions") := predict(glm_baseline_interactions, dt_test, newoffset = dt_test$Policies_Exposed) %>% exp]
 ```
 
 # Visuals of baseline interactions GLM fit {.tabset}
 
 ## Train data {.tabset}
-- Visuals on the train data (calendar years 2012-2017)
+`r if(test_calendaryear) "- Visuals on the train data (calendar years 2012-2017)"`
 
 ```{r }
-pred_col   <- "baseline_interactions_pred"
+pred_col   <- "pred_baseline_interactions"
 
 ae_plots <- setNames(
   lapply(group_cols, function(gc) {
@@ -595,7 +634,7 @@ for(i in 1:length(ae_plots)){
 ```
 
 ## Test data {.tabset}
-- Visuals on the test data (calendar years 2018-2019)
+`r if(test_calendaryear) "- Visuals on the test data (calendar years 2018-2019)"`
 
 ```{r }
 ae_plots <- setNames(
@@ -641,12 +680,16 @@ dev_term <- stats::poisson()$dev.resids
 
 models <- list(
   GLM_baseline = list(
-    train_pred = dt_train$baseline_pred, 
-    test_pred = dt_test$baseline_pred
+    train_pred = dt_train$pred_baseline, 
+    test_pred = dt_test$pred_baseline
   ),
   GLM_baseline_interactions = list(
-    train_pred = dt_train$baseline_interactions_pred, 
-    test_pred = dt_test$baseline_interactions_pred
+    train_pred = dt_train$pred_baseline_interactions, 
+    test_pred = dt_test$pred_baseline_interactions
+  ),
+  XGBoost = list(
+    train_pred = dt_train$pred_xgboost, 
+    test_pred = dt_test$pred_xgboost
   )
 )
 
@@ -661,6 +704,6 @@ comparison <- imap_dfr(models, ~ data.table::data.table(
 ))
 
 DT::datatable(comparison) |>
-  DT::formatRound(columns = c("Poisdev_train_wpred", "Poisdev_test_wpred", "Poisdev_train_wexposure", "Poisdev_test_wexposure", "Poisdev_train_wclaims", "Poisdev_test_wclaims"), digits = 4)
+  DT::formatSignif(columns = c("Poisdev_train_wpred", "Poisdev_test_wpred", "Poisdev_train_wexposure", "Poisdev_test_wexposure", "Poisdev_train_wclaims", "Poisdev_test_wclaims"), digits = 4)
 ```
 
