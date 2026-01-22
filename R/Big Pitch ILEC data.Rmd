@@ -175,27 +175,27 @@ dt_test <- gen_features(dt_test, age_coefs, entry_age_coefs, obs_year_coefs)
 ```
 
 
-```{r GLM combined}
+```{r GLM baseline}
 f <- list()
-f$combined <- stats::as.formula(
+f$baseline <- stats::as.formula(
   Death_Count ~ (agepoly1 + agepoly2 + agepoly3 + agespline2 + agespline3 + agespline4 + Sex * Smoker_Status + Face_Amount_Band + issue_agepoly1 + issue_agepoly2 + Duration + invDur + dur_sq + dur_cube + obs_yearpoly1 + obs_yearpoly2)
   )
-glm_combined <- glm(as.formula(f$combined), dt_train, family = "poisson", offset = log(Policies_Exposed))
+glm_baseline <- glm(as.formula(f$baseline), dt_train, family = "poisson", offset = log(Policies_Exposed))
 ```
 
 ## Baseline model
 ```{r }
 DT::datatable(
-  glm_rr_table(glm_combined),
+  glm_rr_table(glm_baseline),
   rownames = FALSE,
   extensions = "Buttons",
   options = glm_dt_options()
 ) %>% glm_dt_format()
 ```
 
-```{r add combined model pred}
-dt_train[, c("combined_pred") := predict(glm_combined, dt_train, newoffset = dt_train$Policies_Exposed) %>% exp]
-dt_test[, c("combined_pred") := predict(glm_combined, dt_test, newoffset = dt_test$Policies_Exposed) %>% exp]
+```{r add baseline model pred}
+dt_train[, c("baseline_pred") := predict(glm_baseline, dt_train, newoffset = dt_train$Policies_Exposed) %>% exp]
+dt_test[, c("baseline_pred") := predict(glm_baseline, dt_test, newoffset = dt_test$Policies_Exposed) %>% exp]
 ```
 
 # Visuals of baseline GLM fit {.tabset}
@@ -206,7 +206,7 @@ dt_test[, c("combined_pred") := predict(glm_combined, dt_test, newoffset = dt_te
 ```{r }
 ae_plots  <- setNames(vector("list", length(group_cols)), group_cols)
 actual_col <- "Death_Count"
-pred_col   <- "combined_pred"
+pred_col   <- "baseline_pred"
 
 ae_plots <- setNames(
   lapply(group_cols, function(gc) {
@@ -246,7 +246,7 @@ for(i in 1:length(ae_plots)){
 
 # Build XGBoost to probe the GLM fit for deficiencies {.tabset}
 - For the XGBoost, 2017 is used as test data, whilst 2012-2016 are train data <br>
-- The baseline here (i.e. model being evaluated) is the GLM_combined model <br>
+- The baseline here (i.e. model being evaluated) is the GLM_baseline model <br>
 -- This model was selected as a baseline to keep the workflow simple. 
 
 ## Model Training
@@ -259,8 +259,8 @@ dt_va <- dt_train[Observation_Year == 2017]
 # Targets and offsets
 y_tr <- dt_tr[["Death_Count"]]
 y_va <- dt_va[["Death_Count"]]
-offset_tr <- log(dt_tr[["combined_pred"]])
-offset_va <- log(dt_va[["combined_pred"]])
+offset_tr <- log(dt_tr[["baseline_pred"]])
+offset_va <- log(dt_va[["baseline_pred"]])
 
 # Build a formula for the selected features, ex-intercept since we one-hot encode
 f$XGBoost <- as.formula(
@@ -511,8 +511,89 @@ for(k in 1:nrow(top_interactions)) {
 #}
 ```
 
+# GLM supplemented with interactions identified by XGBoost
+```{r GLM interactions}
+interaction_terms <- top_interactions[, {
+  feat1 <- sapply(feature_cols, function(x) grepl(paste0("^", x), Feature1))
+  feat2 <- sapply(feature_cols, function(x) grepl(paste0("^", x), Feature2))
+  
+  feature1_clean <- feature_cols[apply(feat1, 1, which.max)]
+  feature2_clean <- feature_cols[apply(feat2, 1, which.max)]
+  
+  paste(feature1_clean, feature2_clean, sep = ":")
+  }] %>% unique
+
+baseline_rhs <- as.character(f$baseline)[3]
+baseline_rhs_clean <- gsub("^\\((.*)\\)$", "\\1", baseline_rhs)
+all_terms <- paste(c(baseline_rhs_clean, interaction_terms), collapse = " + ")
+formula_string <- paste("Death_Count ~", all_terms)
+f$baseline_interactions <- stats::as.formula(formula_string)
+
+glm_baseline_interactions <- glm(f$baseline_interactions, dt_train, 
+                                  family = "poisson", offset = log(Policies_Exposed))
+```
+
+## Baseline model
+```{r }
+DT::datatable(
+  glm_rr_table(glm_baseline_interactions),
+  rownames = FALSE,
+  extensions = "Buttons",
+  options = glm_dt_options()
+) %>% glm_dt_format()
+```
+
+```{r add baseline interactions model pred}
+dt_train[, c("baseline_interactions_pred") := predict(glm_baseline_interactions, dt_train, newoffset = dt_train$Policies_Exposed) %>% exp]
+dt_test[, c("baseline_interactions_pred") := predict(glm_baseline_interactions, dt_test, newoffset = dt_test$Policies_Exposed) %>% exp]
+```
+
+# Visuals of baseline interactions GLM fit {.tabset}
+
+## Train data {.tabset}
+- Visuals on the train data (calendar years 2012-2017)
+
+```{r }
+pred_col   <- "baseline_interactions_pred"
+
+ae_plots <- setNames(
+  lapply(group_cols, function(gc) {
+    summ <- ae_summary_by(dt_train, gc)
+    ae_plot(summ, gc, top_n = 50)
+  }),
+  group_cols
+)
+```
+
+``` {r, results = 'asis', echo = F}
+for(i in 1:length(ae_plots)){
+  cat(paste0("### ", names(ae_plots)[i]," \n"))
+  print(htmltools::tagList(plotly::ggplotly(ae_plots[[i]])))
+}
+```
+
+## Test data {.tabset}
+- Visuals on the test data (calendar years 2018-2019)
+
+```{r }
+ae_plots <- setNames(
+  lapply(group_cols, function(gc) {
+    summ <- ae_summary_by(dt_test, gc)
+    ae_plot(summ, gc, top_n = 50)
+  }),
+  group_cols
+)
+```
+
+``` {r, results = 'asis', echo = F}
+for(i in 1:length(ae_plots)){
+  cat(paste0("### ", names(ae_plots)[i]," \n"))
+  print(htmltools::tagList(plotly::ggplotly(ae_plots[[i]])))
+}
+```
+
 ## Model Comparison
-```{r lgbm_comparison}
+```{r }
 
 ```
 
@@ -537,9 +618,13 @@ for(k in 1:nrow(top_interactions)) {
 dev_term <- stats::poisson()$dev.resids
 
 models <- list(
-  GLM_combined = list(
-    train_pred = dt_train$combined_pred, 
-    test_pred = dt_test$combined_pred
+  GLM_baseline = list(
+    train_pred = dt_train$baseline_pred, 
+    test_pred = dt_test$baseline_pred
+  ),
+  GLM_baseline_interactions = list(
+    train_pred = dt_train$baseline_interactions_pred, 
+    test_pred = dt_test$baseline_interactions_pred
   )
 )
 
