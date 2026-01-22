@@ -324,8 +324,8 @@ exposure_weights <- exp(offset_tr)
 
 shap_importance <- data.frame(
   Feature = colnames(shap_vals$shap_score),
-  MeanAbsSHAP = apply(shap_vals$shap_score, 2, function(x) mean(abs(x))) %>% round(4),
-  MeanAbsWeightedSHAP = apply(shap_vals$shap_score, 2, function(x) weighted.mean(abs(x), exposure_weights)) %>% round(4)
+  MeanAbsSHAP = apply(shap_vals$shap_score, 2, function(x) mean(abs(x))) %>% round(6),
+  MeanAbsWeightedSHAP = apply(shap_vals$shap_score, 2, function(x) weighted.mean(abs(x), exposure_weights)) %>% round(6)
 ) %>% data.table
 
 shap_importance <- shap_importance[order(-shap_importance$MeanAbsWeightedSHAP), ]
@@ -345,7 +345,8 @@ SHAPforxgboost::shap.plot.summary(shap_long)
 ```
 
 ## SHAP Dependence Plots{.tabset}
-- On training data <br>
+- On training data. <br>
+- SHAP is computed on a weighted random sample of 2,000 rows, where sampling probabilities are proportional to life‑year exposure. <br>
 
 ```{r SHAP dependence, results='asis', echo = F, message = F, warning = F}
 sub_idx <- sample(unique(shap_long$ID), size = 2000, prob = dt_tr$Policies_Exposed)
@@ -399,15 +400,73 @@ for(i in 1:(ncol(X_tr)-1)) {
       data.table(
         Feature1 = feature1,
         Feature2 = feature2,
-        MeanAbsInteraction = mean(abs(interaction_values)),
-        WeightedMeanAbsInteraction = weighted.mean(abs(interaction_values), exposure_weights)
+        MeanAbsInteraction = mean(abs(interaction_values)) %>% round(6),
+        WeightedMeanAbsInteraction = weighted.mean(abs(interaction_values), exposure_weights) %>% round(6)
       )
     )
   }
 }
 
-interaction_summary <- interaction_summary[MeanAbsInteraction != 0][order(-WeightedMeanAbsInteraction)]
+interaction_summary <- interaction_summary[MeanAbsInteraction != 0]
+interaction_summary <- interaction_summary[order(-interaction_summary$WeightedMeanAbsInteraction), ]
 DT::datatable(interaction_summary, options = list(pageLength = 20))
+```
+
+## SHAP Interaction Dependence Plots{.tabset}
+- On training data. <br>
+- SHAP is computed on a weighted random sample of 2,000 rows, where sampling probabilities are proportional to life‑year exposure. <br>
+
+```{r SHAP_interaction_dependence, results='asis', echo = F, message = F, warning = F}
+sub_idx <- sample(unique(shap_long$ID), size = 2000, prob = dt_tr$Policies_Exposed)
+
+N_interactions <- pmin(nrow(interaction_summary), 10)
+top_interactions <- interaction_summary[1:N_interactions]
+
+for(k in 1:nrow(top_interactions)) {
+  feature1 <- top_interactions$Feature1[k]
+  feature2 <- top_interactions$Feature2[k]
+  
+  cat(paste0("### ", feature1, " × ", feature2, " \n\n"))
+  
+  idx1 <- which(colnames(X_tr) == feature1)
+  idx2 <- which(colnames(X_tr) == feature2)
+  
+  interaction_vals <- shap_int[sub_idx, idx1, idx2]
+  
+  plot_data <- data.frame(
+    Feature1_Value = X_tr[sub_idx][[feature1]],
+    Feature2_Value = X_tr[sub_idx][[feature2]],
+    Interaction_SHAP = interaction_vals
+  )
+  
+  plot <- ggplot(plot_data, aes(x = Feature1_Value, y = Feature2_Value, color = Interaction_SHAP)) +
+    geom_point(alpha = 0.6, size = 1.5) +
+    scale_color_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0) +
+    labs(
+      x = feature1,
+      y = feature2,
+      color = "Interaction\nSHAP Value",
+      title = paste("SHAP Interaction:", feature1, "×", feature2)
+    ) +
+    theme_minimal()
+  
+  feature1_values <- X_tr[sub_idx][[feature1]]
+  feature2_values <- X_tr[sub_idx][[feature2]]
+  
+  if(length(unique(feature1_values)) == 2 && all(feature1_values %in% c(0, 1, TRUE, FALSE))) {
+    plot <- plot + 
+      scale_x_continuous(breaks = c(0, 1), labels = c("FALSE", "TRUE"))
+  }
+  
+  if(length(unique(feature2_values)) == 2 && all(feature2_values %in% c(0, 1, TRUE, FALSE))) {
+    plot <- plot + 
+      scale_y_continuous(breaks = c(0, 1), labels = c("FALSE", "TRUE"))
+  }
+  
+  plotly_obj <- ggplotly(plot)
+  print(htmltools::tagList(plotly_obj))
+  cat('\n\n')
+}
 ```
 
 ## Interaction Heatmap
