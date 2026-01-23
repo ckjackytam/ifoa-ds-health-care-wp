@@ -215,52 +215,6 @@ dt_train[, c("pred_baseline") := predict(glm_baseline, dt_train, newoffset = dt_
 dt_test[, c("pred_baseline") := predict(glm_baseline, dt_test, newoffset = dt_test$Policies_Exposed) %>% exp]
 ```
 
-# Visuals of baseline GLM fit {.tabset}
-
-## Train data {.tabset}
-`r if(test_calendaryear) "- Visuals on the train data (calendar years 2012-2017)"`
-
-```{r }
-ae_plots  <- setNames(vector("list", length(group_cols)), group_cols)
-actual_col <- "Death_Count"
-pred_col   <- "pred_baseline"
-
-ae_plots <- setNames(
-  lapply(group_cols, function(gc) {
-    summ <- ae_summary_by(dt_train, gc)
-    ae_plot(summ, gc, top_n = 50)
-  }),
-  group_cols
-)
-```
-
-``` {r, results = 'asis', echo = F}
-for(i in 1:length(ae_plots)){
-  cat(paste0("### ", names(ae_plots)[i]," \n"))
-  print(htmltools::tagList(plotly::ggplotly(ae_plots[[i]])))
-}
-```
-
-## Test data {.tabset}
-`r if(test_calendaryear) "- Visuals on the test data (calendar years 2018-2019)"`
-
-```{r }
-ae_plots <- setNames(
-  lapply(group_cols, function(gc) {
-    summ <- ae_summary_by(dt_test, gc)
-    ae_plot(summ, gc, top_n = 50)
-  }),
-  group_cols
-)
-```
-
-``` {r, results = 'asis', echo = F}
-for(i in 1:length(ae_plots)){
-  cat(paste0("### ", names(ae_plots)[i]," \n"))
-  print(htmltools::tagList(plotly::ggplotly(ae_plots[[i]])))
-}
-```
-
 # Build XGBoost to probe the GLM fit for deficiencies {.tabset}
 `r if(test_calendaryear) "- For the XGBoost, 2017 is used as test data, whilst 2012-2016 are train data <br>"`
 - The baseline here (i.e. model being evaluated) is the GLM_baseline model <br>
@@ -323,9 +277,9 @@ params <- list(
   eval_metric = "poisson-nloglik",
   eta = 0.1,
   max_depth = 3,
-  subsample = 0.8,
+  subsample = 0.6,
   colsample_bytree = 0.8,
-  min_child_weight = 100,
+  min_child_weight = 500,
   interaction_constraints = feature_groups
   )
 
@@ -609,49 +563,6 @@ dt_train[, c("pred_baseline_interactions") := predict(glm_baseline_interactions,
 dt_test[, c("pred_baseline_interactions") := predict(glm_baseline_interactions, dt_test, newoffset = dt_test$Policies_Exposed) %>% exp]
 ```
 
-# Visuals of baseline interactions GLM fit {.tabset}
-
-## Train data {.tabset}
-`r if(test_calendaryear) "- Visuals on the train data (calendar years 2012-2017)"`
-
-```{r }
-pred_col   <- "pred_baseline_interactions"
-
-ae_plots <- setNames(
-  lapply(group_cols, function(gc) {
-    summ <- ae_summary_by(dt_train, gc)
-    ae_plot(summ, gc, top_n = 50)
-  }),
-  group_cols
-)
-```
-
-``` {r, results = 'asis', echo = F}
-for(i in 1:length(ae_plots)){
-  cat(paste0("### ", names(ae_plots)[i]," \n"))
-  print(htmltools::tagList(plotly::ggplotly(ae_plots[[i]])))
-}
-```
-
-## Test data {.tabset}
-`r if(test_calendaryear) "- Visuals on the test data (calendar years 2018-2019)"`
-
-```{r }
-ae_plots <- setNames(
-  lapply(group_cols, function(gc) {
-    summ <- ae_summary_by(dt_test, gc)
-    ae_plot(summ, gc, top_n = 50)
-  }),
-  group_cols
-)
-```
-
-``` {r, results = 'asis', echo = F}
-for(i in 1:length(ae_plots)){
-  cat(paste0("### ", names(ae_plots)[i]," \n"))
-  print(htmltools::tagList(plotly::ggplotly(ae_plots[[i]])))
-}
-```
 
 ## Model Comparison
 ```{r }
@@ -703,12 +614,151 @@ iblm_model <- train_iblm_xgb_offset(
   df_list,
   response_var = "Death_Count",
   family = "poisson",
-  params = list(seed = 1234, eta = 0.1),
+  params = list(seed = 1234, 
+                eta = 0.1,
+                subsample = 0.6,
+                colsample_bytree = 0.8,
+                min_child_weight = 500),
   offset_var = "Policies_Exposed"
 )
 
 dt_train[, c("pred_IBLM") := predict.iblm(iblm_model, dt_train[,c(names(dt_tr[,1:9]), "Policies_Exposed"), with = FALSE])]
 dt_test[, c("pred_IBLM") := predict.iblm(iblm_model, df_list$test)]
+```
+
+# Visuals of model fits {.tabset}
+
+## Baseline GLM  {.tabset}
+### Train data {.tabset}
+`r if(test_calendaryear) "- Visuals on the train data (calendar years 2012-2017)"`
+
+```{r }
+ae_plots  <- setNames(vector("list", length(group_cols)), group_cols)
+actual_col <- "Death_Count"
+pred_col   <- "pred_baseline"
+
+ae_plots <- setNames(
+  lapply(group_cols, function(gc) {
+    summ <- ae_summary_by(dt_train, gc)
+    ae_plot(summ, gc, top_n = 50)
+  }),
+  group_cols
+)
+```
+
+``` {r, results = 'asis', echo = F}
+for(i in 1:length(ae_plots)){
+  cat(paste0("#### ", names(ae_plots)[i]," \n"))
+  print(htmltools::tagList(plotly::ggplotly(ae_plots[[i]])))
+}
+```
+
+### Test data {.tabset}
+`r if(test_calendaryear) "- Visuals on the test data (calendar years 2018-2019)"`
+
+```{r }
+ae_plots <- setNames(
+  lapply(group_cols, function(gc) {
+    summ <- ae_summary_by(dt_test, gc)
+    ae_plot(summ, gc, top_n = 50)
+  }),
+  group_cols
+)
+```
+
+``` {r, results = 'asis', echo = F}
+for(i in 1:length(ae_plots)){
+  cat(paste0("#### ", names(ae_plots)[i]," \n"))
+  print(htmltools::tagList(plotly::ggplotly(ae_plots[[i]])))
+}
+```
+
+## XGBoost {.tabset}
+
+### Train data {.tabset}
+`r if(test_calendaryear) "- Visuals on the train data (calendar years 2012-2017)"`
+
+```{r }
+pred_col   <- "pred_xgboost"
+
+ae_plots <- setNames(
+  lapply(group_cols, function(gc) {
+    summ <- ae_summary_by(dt_train, gc)
+    ae_plot(summ, gc, top_n = 50)
+  }),
+  group_cols
+)
+```
+
+``` {r, results = 'asis', echo = F}
+for(i in 1:length(ae_plots)){
+  cat(paste0("#### ", names(ae_plots)[i]," \n"))
+  print(htmltools::tagList(plotly::ggplotly(ae_plots[[i]])))
+}
+```
+
+### Test data {.tabset}
+`r if(test_calendaryear) "- Visuals on the test data (calendar years 2018-2019)"`
+
+```{r }
+ae_plots <- setNames(
+  lapply(group_cols, function(gc) {
+    summ <- ae_summary_by(dt_test, gc)
+    ae_plot(summ, gc, top_n = 50)
+  }),
+  group_cols
+)
+```
+
+``` {r, results = 'asis', echo = F}
+for(i in 1:length(ae_plots)){
+  cat(paste0("#### ", names(ae_plots)[i]," \n"))
+  print(htmltools::tagList(plotly::ggplotly(ae_plots[[i]])))
+}
+```
+
+## IBLM {.tabset}
+
+### Train data {.tabset}
+`r if(test_calendaryear) "- Visuals on the train data (calendar years 2012-2017)"`
+
+```{r }
+pred_col   <- "pred_IBLM"
+
+ae_plots <- setNames(
+  lapply(group_cols, function(gc) {
+    summ <- ae_summary_by(dt_train, gc)
+    ae_plot(summ, gc, top_n = 50)
+  }),
+  group_cols
+)
+```
+
+``` {r, results = 'asis', echo = F}
+for(i in 1:length(ae_plots)){
+  cat(paste0("#### ", names(ae_plots)[i]," \n"))
+  print(htmltools::tagList(plotly::ggplotly(ae_plots[[i]])))
+}
+```
+
+### Test data {.tabset}
+`r if(test_calendaryear) "- Visuals on the test data (calendar years 2018-2019)"`
+
+```{r }
+ae_plots <- setNames(
+  lapply(group_cols, function(gc) {
+    summ <- ae_summary_by(dt_test, gc)
+    ae_plot(summ, gc, top_n = 50)
+  }),
+  group_cols
+)
+```
+
+``` {r, results = 'asis', echo = F}
+for(i in 1:length(ae_plots)){
+  cat(paste0("#### ", names(ae_plots)[i]," \n"))
+  print(htmltools::tagList(plotly::ggplotly(ae_plots[[i]])))
+}
 ```
 
 # Evaluate model performance
