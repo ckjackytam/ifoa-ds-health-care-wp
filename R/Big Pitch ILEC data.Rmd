@@ -626,6 +626,13 @@ dt_train[, c("pred_IBLM") := predict.iblm(iblm_model, dt_train[,c(names(dt_tr[,1
 dt_test[, c("pred_IBLM") := predict.iblm(iblm_model, df_list$test)]
 ```
 
+```{r Save data and splits for collaborators}
+#ilec$is_test <- is_test
+#ilec$is_validation <- FALSE
+#ilec[is_test == FALSE]$is_validation <- is_validation
+#arrow::write_parquet(ilec, "Data/ILEC_2012_19_aggregated_20260123.parquet")
+```
+
 # Visuals of model fits {.tabset}
 ```{r, results = 'asis', echo = FALSE}
 models <- c("Baseline GLM" = "pred_baseline", 
