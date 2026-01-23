@@ -637,7 +637,8 @@ dt_test[, c("pred_IBLM") := predict.iblm(iblm_model, df_list$test)]
 ```{r, results = 'asis', echo = FALSE}
 models <- c("Baseline GLM" = "pred_baseline", 
             "XGBoost" = "pred_xgboost", 
-            "IBLM" = "pred_IBLM")
+            "IBLM" = "pred_IBLM", 
+            "ILEC_Basis" = "ExpDth_VBT2015wMI_Cnt")
 
 actual_col <- "Death_Count"
 
@@ -701,11 +702,17 @@ models <- list(
   IBLM = list(
     train_pred = dt_train$pred_IBLM, 
     test_pred = dt_test$pred_IBLM
+  ),
+  ILEC_basis = list(
+    train_pred = dt_train$ExpDth_VBT2015wMI_Cnt, 
+    test_pred = dt_test$ExpDth_VBT2015wMI_Cnt
   )
 )
 
 comparison <- imap_dfr(models, ~ data.table::data.table(
   Model             = .y,
+  avgPoisdev_train = mean(dev_term(dt_train$Death_Count, .x$train_pred, 1)),
+  avgPoisdev_test = mean(dev_term(dt_test$Death_Count, .x$test_pred, 1)),
   Poisdev_train_wpred = mean(dev_term(dt_train$Death_Count, .x$train_pred, wt = dt_train$ExpDth_VBT2015wMI_Cnt)),
   Poisdev_test_wpred = mean(dev_term(dt_test$Death_Count, .x$test_pred, wt = dt_test$ExpDth_VBT2015wMI_Cnt)),
   Poisdev_train_wexposure = mean(dev_term(dt_train$Death_Count, .x$train_pred, wt = dt_train$Policies_Exposed)),
@@ -715,6 +722,6 @@ comparison <- imap_dfr(models, ~ data.table::data.table(
 ))
 
 DT::datatable(comparison) |>
-  DT::formatSignif(columns = c("Poisdev_train_wpred", "Poisdev_test_wpred", "Poisdev_train_wexposure", "Poisdev_test_wexposure", "Poisdev_train_wclaims", "Poisdev_test_wclaims"), digits = 4)
+  DT::formatSignif(columns = c("avgPoisdev_train", "avgPoisdev_test", "Poisdev_train_wpred", "Poisdev_test_wpred", "Poisdev_train_wexposure", "Poisdev_test_wexposure", "Poisdev_train_wclaims", "Poisdev_test_wclaims"), digits = 4)
 ```
 
