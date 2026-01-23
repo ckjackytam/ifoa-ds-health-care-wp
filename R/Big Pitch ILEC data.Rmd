@@ -627,75 +627,36 @@ dt_test[, c("pred_IBLM") := predict.iblm(iblm_model, df_list$test)]
 ```
 
 # Visuals of model fits {.tabset}
+```{r, results = 'asis', echo = FALSE}
+models <- c("Baseline GLM" = "pred_baseline", 
+            "XGBoost" = "pred_xgboost", 
+            "IBLM" = "pred_IBLM")
 
-## Baseline GLM  {.tabset}
-`r if(test_calendaryear) "- Visuals on the train data (calendar years 2012-2017)"`
-`r if(test_calendaryear) "- Visuals on the test data (calendar years 2018-2019)"`
-
-```{r }
-ae_plots  <- setNames(vector("list", length(group_cols)), group_cols)
 actual_col <- "Death_Count"
-pred_col   <- "pred_baseline"
 
-ae_plots <- setNames(
-  lapply(group_cols, function(gc) {
-    summ <- ae_summary_train_test(dt_train, dt_test, gc)
-    ae_plot(summ, gc, top_n = 50)
-  }),
-  group_cols
-)
-```
-
-``` {r, results = 'asis', echo = F}
-for(i in 1:length(ae_plots)){
-  cat(paste0("### ", names(ae_plots)[i]," \n"))
-  print(htmltools::tagList(plotly::ggplotly(ae_plots[[i]])))
-}
-```
-
-## XGBoost {.tabset}
-`r if(test_calendaryear) "- Visuals on the train data (calendar years 2012-2017)"`
-`r if(test_calendaryear) "- Visuals on the test data (calendar years 2018-2019)"`
-
-```{r }
-pred_col   <- "pred_xgboost"
-
-ae_plots <- setNames(
-  lapply(group_cols, function(gc) {
-    summ <- ae_summary_train_test(dt_train, dt_test, gc)
-    ae_plot(summ, gc, top_n = 50)
-  }),
-  group_cols
-)
-```
-
-``` {r, results = 'asis', echo = F}
-for(i in 1:length(ae_plots)){
-  cat(paste0("### ", names(ae_plots)[i]," \n"))
-  print(htmltools::tagList(plotly::ggplotly(ae_plots[[i]])))
-}
-```
-
-## IBLM {.tabset}
-`r if(test_calendaryear) "- Visuals on the train data (calendar years 2012-2017)"`
-`r if(test_calendaryear) "- Visuals on the test data (calendar years 2018-2019)"`
-
-```{r }
-pred_col   <- "pred_IBLM"
-
-ae_plots <- setNames(
-  lapply(group_cols, function(gc) {
-    summ <- ae_summary_train_test(dt_train, dt_test, gc)
-    ae_plot(summ, gc, top_n = 50)
-  }),
-  group_cols
-)
-```
-
-``` {r, results = 'asis', echo = F}
-for(i in 1:length(ae_plots)){
-  cat(paste0("### ", names(ae_plots)[i]," \n"))
-  print(htmltools::tagList(plotly::ggplotly(ae_plots[[i]])))
+for(model_name in names(models)) {
+  cat(paste0("\n## ", model_name, " {.tabset}\n\n"))
+  
+  if(test_calendaryear) {
+    cat("- Visuals on the train data (calendar years 2012-2017)\n")
+    cat("- Visuals on the test data (calendar years 2018-2019)\n\n")
+  }
+  
+  pred_col <<- models[model_name]
+  
+  ae_plots <- setNames(
+    lapply(group_cols, function(gc) {
+      summ <- ae_summary_by(dt_train, dt_test, gc)
+      ae_plot(summ, gc, top_n = 50)
+    }),
+    group_cols
+  )
+  
+  for(i in seq_along(ae_plots)) {
+    cat(paste0("\n### ", names(ae_plots)[i], "\n\n"))
+    print(htmltools::tagList(plotly::ggplotly(ae_plots[[i]])))
+    cat("\n")
+  }
 }
 ```
 
@@ -704,8 +665,7 @@ for(i in 1:length(ae_plots)){
 -- Average Poisson deviance is incorrect since exposure per row ranges from a single day to 5,502 years. <br> <br>
 
 <b>Metrics</b>
--- <b>Preferred Metric</b>: mean Poisson deviance, weighted by predicted claims (i.e. Poisson deviance per predicted claim). <br>
---- Some concerns around circularity (i.e. the model decides weights), but in practise prediction differences between models will be in the order of 1-10%. <br>
+-- <b>Preferred Metric</b>: mean Poisson deviance, weighted by ILEC expected claims (i.e. Poisson deviance per expected claim). <br>
 -- Metric: mean Poisson deviance, weighted by life year exposure (i.e. Poisson deviance per predicted claim). <br>
 --- Downside is that low risk life years (e.g. 20 year olds) given the same weight as high risk life years (e.g. 80 year olds) <br>
 -- Metric: mean Poisson deviance, weighted by actual claims (i.e. Poisson deviance per predicted claim). <br>
@@ -739,8 +699,8 @@ models <- list(
 
 comparison <- imap_dfr(models, ~ data.table::data.table(
   Model             = .y,
-  Poisdev_train_wpred = mean(dev_term(dt_train$Death_Count, .x$train_pred, wt = .x$train_pred)),
-  Poisdev_test_wpred = mean(dev_term(dt_test$Death_Count, .x$test_pred, wt = .x$test_pred)),
+  Poisdev_train_wpred = mean(dev_term(dt_train$Death_Count, .x$train_pred, wt = dt_train$ExpDth_VBT2015wMI_Cnt)),
+  Poisdev_test_wpred = mean(dev_term(dt_test$Death_Count, .x$test_pred, wt = dt_test$ExpDth_VBT2015wMI_Cnt)),
   Poisdev_train_wexposure = mean(dev_term(dt_train$Death_Count, .x$train_pred, wt = dt_train$Policies_Exposed)),
   Poisdev_test_wexposure = mean(dev_term(dt_test$Death_Count, .x$test_pred, wt = dt_test$Policies_Exposed)),
   Poisdev_train_wclaims = mean(dev_term(dt_train$Death_Count, .x$train_pred, wt = dt_train$Death_Count)),
