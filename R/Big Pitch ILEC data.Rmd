@@ -200,7 +200,7 @@ f$baseline <- stats::as.formula(
 glm_baseline <- glm(as.formula(f$baseline), dt_train, family = "poisson", offset = log(Policies_Exposed))
 ```
 
-## Baseline model
+# Baseline model
 ```{r }
 DT::datatable(
   glm_rr_table(glm_baseline),
@@ -658,9 +658,57 @@ for(i in 1:length(ae_plots)){
 
 ```
 
-## Key Insights
-```{r insights}
+# LASSO supplemented with interactions identified by XGBoost
+```{r LASSO}
+X_train <- model.matrix(f$baseline_interactions, dt_train)[, -1]
+y_train <- dt_train$Death_Count
+offset_train <- log(dt_train$Policies_Exposed)
 
+cv_baseline_interactions <- cv.glmnet(
+    x = X_train,
+    y = y_train,
+    family = "poisson",
+    offset = offset_train,
+    alpha = 1,  # 1 = lasso, 0 = ridge, 0 < alpha < 1 = elastic net
+    nfolds = 10
+)
+
+dt_train[, c("pred_LASSO_baseline_interactions") := 
+           predict(cv_baseline_interactions, 
+                      newx = X_train, 
+                      newoffset = offset_train,
+                      s = "lambda.min",
+                      type = "response")]
+
+X_test <- model.matrix(f$baseline_interactions, dt_test)[, -1]
+offset_test <- log(dt_test$Policies_Exposed)
+
+dt_test[, c("pred_LASSO_baseline_interactions") := 
+           predict(cv_baseline_interactions, 
+                      newx = X_test, 
+                      newoffset = offset_test,
+                      s = "lambda.min", 
+                      type = "response")]
+```
+
+# IBLM model
+```{r IBLM}
+df_list <- list(
+  train = dt_tr[,c(names(dt_tr[,1:9]), "Policies_Exposed"), with = FALSE], # Same as used for XGBoost
+  test = dt_test[,c(names(dt_test[,1:9]), "Policies_Exposed"), with = FALSE],
+  validate = dt_va[,c(names(dt_va[,1:9]), "Policies_Exposed"), with = FALSE] # Same as used for XGBoost
+)
+
+iblm_model <- train_iblm_xgb_offset(
+  df_list,
+  response_var = "Death_Count",
+  family = "poisson",
+  params = list(seed = 1234, eta = 0.1),
+  offset_var = "Policies_Exposed"
+)
+
+dt_train[, c("pred_IBLM") := predict.iblm(iblm_model, dt_train[,c(names(dt_tr[,1:9]), "Policies_Exposed"), with = FALSE])]
+dt_test[, c("pred_IBLM") := predict.iblm(iblm_model, df_list$test)]
 ```
 
 # Evaluate model performance
@@ -687,9 +735,17 @@ models <- list(
     train_pred = dt_train$pred_baseline_interactions, 
     test_pred = dt_test$pred_baseline_interactions
   ),
+  LASSO_baseline_interactions = list(
+    train_pred = dt_train$pred_LASSO_baseline_interactions, 
+    test_pred = dt_test$pred_LASSO_baseline_interactions
+  ),
   XGBoost = list(
     train_pred = dt_train$pred_xgboost, 
     test_pred = dt_test$pred_xgboost
+  ),
+  IBLM = list(
+    train_pred = dt_train$pred_IBLM, 
+    test_pred = dt_test$pred_IBLM
   )
 )
 
