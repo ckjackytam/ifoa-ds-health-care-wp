@@ -629,8 +629,8 @@ dt_test[, c("pred_IBLM") := predict.iblm(iblm_model, df_list$test)]
 # Visuals of model fits {.tabset}
 
 ## Baseline GLM  {.tabset}
-### Train data {.tabset}
 `r if(test_calendaryear) "- Visuals on the train data (calendar years 2012-2017)"`
+`r if(test_calendaryear) "- Visuals on the test data (calendar years 2018-2019)"`
 
 ```{r }
 ae_plots  <- setNames(vector("list", length(group_cols)), group_cols)
@@ -639,7 +639,7 @@ pred_col   <- "pred_baseline"
 
 ae_plots <- setNames(
   lapply(group_cols, function(gc) {
-    summ <- ae_summary_by(dt_train, gc)
+    summ <- ae_summary_train_test(dt_train, dt_test, gc)
     ae_plot(summ, gc, top_n = 50)
   }),
   group_cols
@@ -648,42 +648,21 @@ ae_plots <- setNames(
 
 ``` {r, results = 'asis', echo = F}
 for(i in 1:length(ae_plots)){
-  cat(paste0("#### ", names(ae_plots)[i]," \n"))
-  print(htmltools::tagList(plotly::ggplotly(ae_plots[[i]])))
-}
-```
-
-### Test data {.tabset}
-`r if(test_calendaryear) "- Visuals on the test data (calendar years 2018-2019)"`
-
-```{r }
-ae_plots <- setNames(
-  lapply(group_cols, function(gc) {
-    summ <- ae_summary_by(dt_test, gc)
-    ae_plot(summ, gc, top_n = 50)
-  }),
-  group_cols
-)
-```
-
-``` {r, results = 'asis', echo = F}
-for(i in 1:length(ae_plots)){
-  cat(paste0("#### ", names(ae_plots)[i]," \n"))
+  cat(paste0("### ", names(ae_plots)[i]," \n"))
   print(htmltools::tagList(plotly::ggplotly(ae_plots[[i]])))
 }
 ```
 
 ## XGBoost {.tabset}
-
-### Train data {.tabset}
 `r if(test_calendaryear) "- Visuals on the train data (calendar years 2012-2017)"`
+`r if(test_calendaryear) "- Visuals on the test data (calendar years 2018-2019)"`
 
 ```{r }
 pred_col   <- "pred_xgboost"
 
 ae_plots <- setNames(
   lapply(group_cols, function(gc) {
-    summ <- ae_summary_by(dt_train, gc)
+    summ <- ae_summary_train_test(dt_train, dt_test, gc)
     ae_plot(summ, gc, top_n = 50)
   }),
   group_cols
@@ -692,42 +671,21 @@ ae_plots <- setNames(
 
 ``` {r, results = 'asis', echo = F}
 for(i in 1:length(ae_plots)){
-  cat(paste0("#### ", names(ae_plots)[i]," \n"))
-  print(htmltools::tagList(plotly::ggplotly(ae_plots[[i]])))
-}
-```
-
-### Test data {.tabset}
-`r if(test_calendaryear) "- Visuals on the test data (calendar years 2018-2019)"`
-
-```{r }
-ae_plots <- setNames(
-  lapply(group_cols, function(gc) {
-    summ <- ae_summary_by(dt_test, gc)
-    ae_plot(summ, gc, top_n = 50)
-  }),
-  group_cols
-)
-```
-
-``` {r, results = 'asis', echo = F}
-for(i in 1:length(ae_plots)){
-  cat(paste0("#### ", names(ae_plots)[i]," \n"))
+  cat(paste0("### ", names(ae_plots)[i]," \n"))
   print(htmltools::tagList(plotly::ggplotly(ae_plots[[i]])))
 }
 ```
 
 ## IBLM {.tabset}
-
-### Train data {.tabset}
 `r if(test_calendaryear) "- Visuals on the train data (calendar years 2012-2017)"`
+`r if(test_calendaryear) "- Visuals on the test data (calendar years 2018-2019)"`
 
 ```{r }
 pred_col   <- "pred_IBLM"
 
 ae_plots <- setNames(
   lapply(group_cols, function(gc) {
-    summ <- ae_summary_by(dt_train, gc)
+    summ <- ae_summary_train_test(dt_train, dt_test, gc)
     ae_plot(summ, gc, top_n = 50)
   }),
   group_cols
@@ -736,27 +694,7 @@ ae_plots <- setNames(
 
 ``` {r, results = 'asis', echo = F}
 for(i in 1:length(ae_plots)){
-  cat(paste0("#### ", names(ae_plots)[i]," \n"))
-  print(htmltools::tagList(plotly::ggplotly(ae_plots[[i]])))
-}
-```
-
-### Test data {.tabset}
-`r if(test_calendaryear) "- Visuals on the test data (calendar years 2018-2019)"`
-
-```{r }
-ae_plots <- setNames(
-  lapply(group_cols, function(gc) {
-    summ <- ae_summary_by(dt_test, gc)
-    ae_plot(summ, gc, top_n = 50)
-  }),
-  group_cols
-)
-```
-
-``` {r, results = 'asis', echo = F}
-for(i in 1:length(ae_plots)){
-  cat(paste0("#### ", names(ae_plots)[i]," \n"))
+  cat(paste0("### ", names(ae_plots)[i]," \n"))
   print(htmltools::tagList(plotly::ggplotly(ae_plots[[i]])))
 }
 ```
