@@ -67,6 +67,7 @@ set.seed(1234)
 ```{r flags, include=FALSE, echo=FALSE}
 test_calendaryear <- FALSE # Sets test data be calendar years 2018-2019 (TRUE), or 20% random sample (FALSE)
 data_proportion <- FALSE # Set to desired data sample fraction, otherwise FALSE (or 1)
+depths <- 1:3 # Tree depths for IBLM XGBoost booster
 ```
 
 ```{r, include=FALSE, echo=FALSE}
@@ -602,28 +603,48 @@ dt_test[, c("pred_LASSO_baseline_interactions") :=
                       type = "response")]
 ```
 
-# IBLM model
+# IBLM models
+- IBLM models were build with tree depth 1, 2 and 3 on the booster XGBoost model. <br>
+-- This decision was made as it was felt that a tree depth of 3 (the default), results in (very) hard to explain third order variable interactions. 
+
 ```{r IBLM}
+xcols <- c(names(dt_tr[, 1:9]), "Policies_Exposed")
+
+base_params <- list(
+  seed = 1234,
+  eta = 0.1,
+  subsample = 0.6,
+  colsample_bytree = 0.8,
+  min_child_weight = 500
+)
+
 df_list <- list(
-  train = dt_tr[,c(names(dt_tr[,1:9]), "Policies_Exposed"), with = FALSE], # Same as used for XGBoost
-  test = dt_test[,c(names(dt_test[,1:9]), "Policies_Exposed"), with = FALSE],
-  validate = dt_va[,c(names(dt_va[,1:9]), "Policies_Exposed"), with = FALSE] # Same as used for XGBoost
-)
+    train = dt_tr[, ..xcols], # Same as used for XGBoost
+    test = dt_test[, ..xcols],
+    validate = dt_va[, ..xcols] # Same as used for XGBoost
+    )
 
-iblm_model <- train_iblm_xgb_offset(
-  df_list,
-  response_var = "Death_Count",
-  family = "poisson",
-  params = list(seed = 1234, 
-                eta = 0.1,
-                subsample = 0.6,
-                colsample_bytree = 0.8,
-                min_child_weight = 500),
-  offset_var = "Policies_Exposed"
-)
+iblm_models <- setNames(vector("list", length(depths)), paste0("d", depths))
+for (d in depths) {
+  iblm_models[[paste0("d", d)]] <- train_iblm_xgb_offset(
+    df_list,
+    response_var = "Death_Count",
+    family = "poisson",
+    params = c(base_params, list(max_depth = d)),
+    offset_var = "Policies_Exposed"
+  )
+}
 
-dt_train[, c("pred_IBLM") := predict.iblm(iblm_model, dt_train[,c(names(dt_tr[,1:9]), "Policies_Exposed"), with = FALSE])]
-dt_test[, c("pred_IBLM") := predict.iblm(iblm_model, df_list$test)]
+for (d in depths) {
+  nm <- paste0("d", d)
+  pred_col <- paste0("pred_IBLM_", nm)
+  
+  dt_train[, (pred_col) := predict.iblm(iblm_models[[nm]],
+                                        dt_train[, ..xcols])]
+  
+  dt_test[,  (pred_col) := predict.iblm(iblm_models[[nm]],
+                                        df_list$test)]
+}
 ```
 
 ```{r Save data and splits for collaborators}
@@ -637,7 +658,7 @@ dt_test[, c("pred_IBLM") := predict.iblm(iblm_model, df_list$test)]
 ```{r, results = 'asis', echo = FALSE}
 models <- c("Baseline GLM" = "pred_baseline", 
             "XGBoost" = "pred_xgboost", 
-            "IBLM" = "pred_IBLM", 
+            "IBLM_depth2" = "pred_IBLM_d2", 
             "ILEC_Basis" = "ExpDth_VBT2015wMI_Cnt")
 
 actual_col <- "Death_Count"
@@ -699,9 +720,17 @@ models <- list(
     train_pred = dt_train$pred_xgboost, 
     test_pred = dt_test$pred_xgboost
   ),
-  IBLM = list(
-    train_pred = dt_train$pred_IBLM, 
-    test_pred = dt_test$pred_IBLM
+  IBLM_d1 = list(
+    train_pred = dt_train$pred_IBLM_d1, 
+    test_pred = dt_test$pred_IBLM_d1
+  ),
+  IBLM_d2 = list(
+    train_pred = dt_train$pred_IBLM_d2, 
+    test_pred = dt_test$pred_IBLM_d2
+  ),
+  IBLM_d3 = list(
+    train_pred = dt_train$pred_IBLM_d3, 
+    test_pred = dt_test$pred_IBLM_d3
   ),
   ILEC_basis = list(
     train_pred = dt_train$ExpDth_VBT2015wMI_Cnt, 
