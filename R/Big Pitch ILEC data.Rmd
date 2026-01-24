@@ -188,15 +188,16 @@ dt_test <- ilec[ is_test, , drop = FALSE]
 age_coefs <- attr(poly(dt_train$Attained_Age, 3), "coefs")
 entry_age_coefs <- attr(poly(dt_train$Issue_Age, 3), "coefs")
 obs_year_coefs <- attr(poly(dt_train$Observation_Year, 3), "coefs")
+issue_year_coefs <- attr(poly(dt_train$Issue_Year, 3), "coefs")
 
-dt_train <- gen_features(dt_train, age_coefs, entry_age_coefs, obs_year_coefs)
-dt_test <- gen_features(dt_test, age_coefs, entry_age_coefs, obs_year_coefs)
+dt_train <- gen_features(dt_train, age_coefs, entry_age_coefs, obs_year_coefs, issue_year_coefs)
+dt_test <- gen_features(dt_test, age_coefs, entry_age_coefs, obs_year_coefs, issue_year_coefs)
 ```
 
 ```{r GLM baseline}
 f <- list()
 f$baseline <- stats::as.formula(
-  Death_Count ~ (agepoly1 + agepoly2 + agepoly3 + agespline2 + agespline3 + agespline4 + Sex * Smoker_Status + Face_Amount_Band + issue_agepoly1 + issue_agepoly2 + Duration + invDur + dur_sq + dur_cube + obs_yearpoly1 + obs_yearpoly2)
+  Death_Count ~ (agepoly1 + agepoly2 + agepoly3 + agespline2 + agespline3 + agespline4 + Sex * Smoker_Status + Face_Amount_Band + issue_agepoly1 + issue_agepoly2 + Duration + invDur + dur_sq + dur_cube + obs_yearpoly1 + obs_yearpoly2 + issue_yearpoly1 + issue_yearpoly2)
   )
 glm_baseline <- glm(as.formula(f$baseline), dt_train, family = "poisson", offset = log(Policies_Exposed))
 ```
@@ -340,7 +341,7 @@ SHAPforxgboost::shap.plot.summary(shap_long)
 
 ## SHAP Dependence Plots{.tabset}
 - On training data. <br>
-- SHAP is computed on a weighted random sample of 2,000 rows, where sampling probabilities are proportional to life‑year exposure. <br>
+- SHAP dependence is visualised on a weighted random sample of 2,000 rows, where sampling probabilities are proportional to life‑year exposure. <br>
 
 ```{r SHAP dependence, results='asis', echo = F, message = F, warning = F}
 sub_idx <- sample(unique(shap_long$ID), size = 2000, prob = dt_tr$Policies_Exposed)
@@ -538,7 +539,8 @@ interaction_terms <- top_interactions[, {
    replacements <- list(
         Issue_Age = "(issue_agepoly1 + issue_agepoly2)",
         Attained_Age = "(agepoly1 + agepoly2)",
-        Duration = "(Duration + invDur + dur_sq)"
+        Duration = "(Duration + invDur + dur_sq)",
+        Issue_Year = "(issue_yearpoly1 + issue_yearpoly2)"
     )
    
     feature1_expanded <- ifelse(feature1_clean %in% names(replacements),
@@ -574,12 +576,6 @@ DT::datatable(
 ```{r add baseline interactions model pred}
 dt_train[, c("pred_baseline_interactions") := predict(glm_baseline_interactions, dt_train, newoffset = dt_train$Policies_Exposed) %>% exp]
 dt_test[, c("pred_baseline_interactions") := predict(glm_baseline_interactions, dt_test, newoffset = dt_test$Policies_Exposed) %>% exp]
-```
-
-
-## Model Comparison
-```{r }
-
 ```
 
 # LASSO supplemented with interactions identified by XGBoost
@@ -668,10 +664,14 @@ for (d in depths) {
 ```
 
 # Visuals of model fits {.tabset}
+- Note the fit of the ILEC expected basis is poor, because it is not calibrated to this specific dataset. <br>
+
 ```{r, results = 'asis', echo = FALSE}
 models <- c("Baseline GLM" = "pred_baseline", 
             "XGBoost" = "pred_xgboost", 
             "IBLM_depth2" = "pred_IBLM_d2", 
+            "Baseline GLM Interactions" = "pred_baseline_interactions",
+            "LASSO Interactions" = "pred_LASSO_baseline_interactions",
             "ILEC_Basis" = "ExpDth_VBT2015wMI_Cnt")
 
 actual_col <- "Death_Count"
