@@ -89,7 +89,11 @@ train_iblm_xgb_offset <- function (df_list, response_var, family = "poisson", pa
   }
   predictor_vars <- setdiff(names(df_list[["train"]]), c(response_var, offset_var))
   formula <- stats::as.formula(paste(response_var, "~", paste(predictor_vars, collapse = " + ")))
-
+  
+  old_contrasts <- getOption("contrasts")
+  on.exit(options(contrasts = old_contrasts), add = TRUE)
+  options(contrasts = c(unordered = "contr.treatment", ordered = "contr.treatment"))
+  
   if(!is.null(offset_var)){
     test_glm_offset <- function(df_list, response_var, offset_var) {
       predictor_vars <- setdiff(names(df_list[["train"]]), c(response_var, offset_var))
@@ -184,7 +188,7 @@ train_iblm_xgb_offset <- function (df_list, response_var, family = "poisson", pa
   predictor_vars <- list()
   predictor_vars$all <- setdiff(names(vartypes), response_var)
   predictor_vars$categorical <- predictor_vars$all[(!vartypes %in% 
-                                                      c("integer", "double") | varclasses == "factor")]
+                                                      c("integer", "double") | varclasses %in% c("factor", "ordered"))]
   predictor_vars$continuous <- setdiff(predictor_vars$all, 
                                        predictor_vars$categorical)
   cat_levels <- list()
@@ -200,8 +204,7 @@ train_iblm_xgb_offset <- function (df_list, response_var, family = "poisson", pa
                                                                                 present_levels)
                                                    setdiff(all_levels, present_levels_clean)
                                                  }), names(cat_levels$all))
-  coeff_names$all_cat <- unlist(lapply(names(cat_levels$all), 
-                                       function(x) paste0(x, cat_levels$all[[x]])))
+  coeff_names$all_cat <- unlist(lapply(names(cat_levels$all), function(x) paste0(x, cat_levels$all[[x]])))
   coeff_names$all <- c("(Intercept)", predictor_vars$continuous, 
                        coeff_names$all_cat)
   coeff_names$reference_cat <- setdiff(coeff_names$all, coef_names_glm)
