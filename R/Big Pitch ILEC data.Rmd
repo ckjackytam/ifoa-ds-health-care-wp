@@ -259,20 +259,33 @@ setinfo(dtrain, "base_margin", offset_tr)
 dvalid <- xgb.DMatrix(data = X_va, label = y_va)
 setinfo(dvalid, "base_margin", offset_va)
 
-# Set interaction constraints within one-hot encoded features
+# Set interaction constraints within one-hot encoded features and for issueage/attainedage/duration
 onehot_cols <- colnames(X_tr)
 face_amount_features <- grep("^Face_Amount_Band", onehot_cols, value = TRUE)
 sex_features <- c("SexF", "SexM")
 smoker_features <- c("Smoker_StatusNS", "Smoker_StatusS")
-numeric_features <- c("Observation_Year", "Issue_Age", "Duration", "Issue_Year", "Attained_Age")
+mutually_exclusive_numerics <- c("Issue_Age", "Duration", "Attained_Age")
+numeric_features <- c("Observation_Year", "Issue_Year")
+
+all_combinations <- expand.grid(
+  face = face_amount_features,
+  sex = sex_features,
+  smoker = smoker_features,
+  numeric_exclusive = mutually_exclusive_numerics,
+  stringsAsFactors = FALSE
+)
 
 feature_groups <- list()
-non_face_features <- c(sex_features, smoker_features, numeric_features)
-feature_groups[[1]] <- which(onehot_cols %in% non_face_features) - 1
-
-for(i in seq_along(face_amount_features)) {
-  feature_groups[[i + 1]] <- which(onehot_cols == face_amount_features[i]) - 1
+for(i in 1:nrow(all_combinations)) {
+  combo_features <- c(
+    all_combinations$face[i],
+    all_combinations$sex[i],
+    all_combinations$smoker[i],
+    numeric_features
+  )
+  feature_groups[[i]] <- which(onehot_cols %in% combo_features) - 1
 }
+
 params <- list(
   objective = "count:poisson",
   eval_metric = "poisson-nloglik",
@@ -282,10 +295,9 @@ params <- list(
   colsample_bytree = 0.8,
   min_child_weight = 500,
   interaction_constraints = feature_groups
-  )
+)
 
 evals_list <- list(train = dtrain, validation = dvalid)
-
 xgb_model <- xgb.train(
   params = params,
   data = dtrain,
@@ -615,7 +627,8 @@ base_params <- list(
   eta = 0.1,
   subsample = 0.6,
   colsample_bytree = 0.8,
-  min_child_weight = 500
+  min_child_weight = 500#, # Note IBLM performs worse with these interaction constraints (possibly because the baseline model is not that strong)
+  #interaction_constraints = feature_groups
 )
 
 df_list <- list(
