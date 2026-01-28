@@ -18,6 +18,7 @@ Python/big-pitch/export/Single Factor Model Predictions_v3.parquet
 Python/big-pitch/export/Single Factor Model Predictions.parquet
 Python/big-pitch/export/XGB Model Predictions_v3.parquet
 Python/big-pitch/export/ILEC_2012_19_aggregated_20260123.parquet
+Python/big-pitch/export/Final Model Predictions_v3.parquet
 Python/big-pitch/export/Modelling_data (Filtered and Grouped by Selected Features)_ml.parquet
 Python/big-pitch/input/ILEC_2012_19 - 20240429.txt
 testing
