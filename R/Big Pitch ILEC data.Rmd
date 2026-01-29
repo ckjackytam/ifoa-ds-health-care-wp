@@ -39,6 +39,8 @@ Description: Achieving the best of both worlds with explainable machine learning
 - Dec 19th - No exclusions made based on combinations of SOA_Guar_Lvl_TP and duration (for now), or Face_Amount_Band <br>
 - Jan 9th - decided the cap duration at 20 due to concerns about data quality at (very) high durations and low volumes of data <br>
 - Jan 13th - decided the exclude unknown smoking status
+- Jan 28th - decided to not use Issue_Age for modelling purposes due to collinearity issues with duration and age_attained
+- Jan 28th - decided to not use Issue_Year for modelling purposes due to collinearity issues with duration and Observation_Year
 
 
 ```{r setup, include=FALSE}
@@ -197,7 +199,7 @@ dt_test <- gen_features(dt_test, age_coefs, entry_age_coefs, obs_year_coefs, iss
 ```{r GLM baseline}
 f <- list()
 f$baseline <- stats::as.formula(
-  Death_Count ~ (agepoly1 + agepoly2 + agepoly3 + agespline2 + agespline3 + agespline4 + Sex * Smoker_Status + Face_Amount_Band + Duration + invDur + dur_sq + dur_cube + obs_yearpoly1 + obs_yearpoly2 + issue_yearpoly1 + issue_yearpoly2)
+  Death_Count ~ (agepoly1 + agepoly2 + agepoly3 + agespline2 + agespline3 + agespline4 + Sex * Smoker_Status + Face_Amount_Band + Duration + invDur + dur_sq + dur_cube + obs_yearpoly1 + obs_yearpoly2)
   )
 glm_baseline <- glm(as.formula(f$baseline), dt_train, family = "poisson", offset = log(Policies_Exposed))
 ```
@@ -238,38 +240,19 @@ dtrain <- xgb.DMatrix(data = X_tr, label = y_tr)
 setinfo(dtrain, "base_margin", offset_tr)
 
 onehot_cols <- colnames(X_tr)
-sex_features <- c("SexF", "SexM")
-smoker_features <- c("Smoker_StatusNS", "Smoker_StatusS")
-numeric_features <- c("Observation_Year", "Issue_Year", "Duration", "Attained_Age", "Face_Amount_Band")
-
-feature_groups <- list()
-all_combinations <- expand.grid(
-  sex = sex_features,
-  smoker = smoker_features,
-  stringsAsFactors = FALSE
-)
-
-for(i in 1:nrow(all_combinations)) {
-  combo_features <- c(
-    all_combinations$sex[i],
-    all_combinations$smoker[i],
-    numeric_features
-  )
-  feature_groups[[length(feature_groups) + 1]] <- which(onehot_cols %in% combo_features) - 1
-}
-
 monotone_constraints <- rep(0, length(onehot_cols))
 monotone_constraints[which(onehot_cols == "Face_Amount_Band")] <- 1  # or -1
 
 params <- list(
   objective = "count:poisson",
   eval_metric = "poisson-nloglik",
-  eta = 0.1,
-  max_depth = 3,
-  subsample = 0.6,
-  colsample_bytree = 0.8,
-  min_child_weight = 500,
-  interaction_constraints = feature_groups#,
+  eta = 0.05,
+  max_depth = 2,
+  subsample = 0.8481199902343008,
+  colsample_bytree = 0.8927827854324062,
+  colsample_bylevel = 0.5957761252433638,
+  gamma = 4.855912520832532e-06,
+  min_child_weight = 412#,
 #  monotone_constraints = monotone_constraints
 )
 
@@ -327,7 +310,7 @@ SHAPforxgboost::shap.plot.summary(shap_long)
 - SHAP dependence is visualised on a weighted random sample of 2,000 rows, where sampling probabilities are proportional to life‑year exposure. <br>
 
 ```{r SHAP dependence, results='asis', echo = F, message = F, warning = F}
-sub_idx <- sample(unique(shap_long$ID), size = 2000, prob = dt_tr$Policies_Exposed)
+sub_idx <- sample(unique(shap_long$ID), size = 2000, prob = dt_train$Policies_Exposed)
 N_features <- pmin(nrow(shap_importance), 10)
 
 for(feature in shap_importance$Feature[1:N_features]){
@@ -395,7 +378,7 @@ DT::datatable(interaction_summary, options = list(pageLength = 20))
 - SHAP is computed on a weighted random sample of 2,000 rows, where sampling probabilities are proportional to life‑year exposure. <br>
 
 ```{r SHAP_interaction_dependence, results='asis', echo = F, message = F, warning = F}
-sub_idx <- sample(unique(shap_long$ID), size = 2000, prob = dt_tr$Policies_Exposed)
+sub_idx <- sample(unique(shap_long$ID), size = 2000, prob = dt_train$Policies_Exposed)
 
 N_interactions <- pmin(nrow(interaction_summary), 10)
 top_interactions <- interaction_summary[1:N_interactions]
@@ -596,24 +579,30 @@ dt_test[, c("pred_LASSO_baseline_interactions") :=
 
 # IBLM models
 - IBLM models were build with tree depth 1, 2 and 3 on the booster XGBoost model. <br>
--- This decision was made as it was felt that a tree depth of 3 (the default), results in (very) hard to explain third order variable interactions. 
-
+-- This decision was made as it was felt that a tree depth of 3 (the default),st_rows 
 ```{r IBLM}
-xcols <- c(names(dt_tr[, c(1:3, 5:9), with = FALSE]), "Policies_Exposed")
+if(isTRUE(test_calendaryear)){
+  years_sorted <- sort(unique(dt_train$Observation_Year))
+  test_years <- tail(years_sorted, 1)
+  is_validation <- dt_train$Observation_Year %in% test_years
+} else {
+  train_rows <- nrow(dt_train)
+  test_rows <- sample(train_rows, floor(0.2 * train_rows))
+  is_validation <- rownames(dt_train) %in% test_rows 
+  }
 
-base_params <- list(
-  seed = 1234,
-  eta = 0.1,
-  subsample = 0.6,
-  colsample_bytree = 0.8,
-  min_child_weight = 500,
-  interaction_constraints = feature_groups
-)
+dt_tr <- dt_train[!is_validation,]
+dt_va <- dt_train[is_validation,]
+
+xcols <- c(names(dt_tr[, c(1:3, 5:6, 8:9), with = FALSE]), "Policies_Exposed")
+
+base_params <- params
+base_params$max_depth <- NULL
 
 df_list <- list(
-    train = dt_tr[, ..xcols], # Same as used for XGBoost
+    train = dt_tr[, ..xcols],
     test = dt_test[, ..xcols],
-    validate = dt_va[, ..xcols] # Same as used for XGBoost
+    validate = dt_va[, ..xcols]
     )
 
 iblm_models <- setNames(vector("list", length(depths)), paste0("d", depths))
