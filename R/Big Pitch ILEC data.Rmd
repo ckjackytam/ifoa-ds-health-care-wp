@@ -197,7 +197,7 @@ dt_test <- gen_features(dt_test, age_coefs, entry_age_coefs, obs_year_coefs, iss
 ```{r GLM baseline}
 f <- list()
 f$baseline <- stats::as.formula(
-  Death_Count ~ (agepoly1 + agepoly2 + agepoly3 + agespline2 + agespline3 + agespline4 + Sex * Smoker_Status + Face_Amount_Band + issue_agepoly1 + issue_agepoly2 + Duration + invDur + dur_sq + dur_cube + obs_yearpoly1 + obs_yearpoly2 + issue_yearpoly1 + issue_yearpoly2)
+  Death_Count ~ (agepoly1 + agepoly2 + agepoly3 + agespline2 + agespline3 + agespline4 + Sex * Smoker_Status + Face_Amount_Band + Duration + invDur + dur_sq + dur_cube + obs_yearpoly1 + obs_yearpoly2 + issue_yearpoly1 + issue_yearpoly2)
   )
 glm_baseline <- glm(as.formula(f$baseline), dt_train, family = "poisson", offset = log(Policies_Exposed))
 ```
@@ -260,32 +260,30 @@ setinfo(dtrain, "base_margin", offset_tr)
 dvalid <- xgb.DMatrix(data = X_va, label = y_va)
 setinfo(dvalid, "base_margin", offset_va)
 
-# Set interaction constraints within one-hot encoded features and for issueage/attainedage/duration
 onehot_cols <- colnames(X_tr)
-face_amount_features <- grep("^Face_Amount_Band", onehot_cols, value = TRUE)
 sex_features <- c("SexF", "SexM")
 smoker_features <- c("Smoker_StatusNS", "Smoker_StatusS")
-mutually_exclusive_numerics <- c("Issue_Age", "Duration", "Attained_Age")
-numeric_features <- c("Observation_Year", "Issue_Year")
-
-all_combinations <- expand.grid(
-  face = face_amount_features,
-  sex = sex_features,
-  smoker = smoker_features,
-  numeric_exclusive = mutually_exclusive_numerics,
-  stringsAsFactors = FALSE
-)
+numeric_features <- c("Observation_Year", "Issue_Year", "Duration", "Attained_Age", "Face_Amount_Band")
 
 feature_groups <- list()
+
+all_combinations <- expand.grid(
+  sex = sex_features,
+  smoker = smoker_features,
+  stringsAsFactors = FALSE
+  )
+
 for(i in 1:nrow(all_combinations)) {
   combo_features <- c(
-    all_combinations$face[i],
     all_combinations$sex[i],
     all_combinations$smoker[i],
     numeric_features
   )
-  feature_groups[[i]] <- which(onehot_cols %in% combo_features) - 1
+  feature_groups[[length(feature_groups) + 1]] <- which(onehot_cols %in% combo_features) - 1
 }
+
+monotone_constraints <- rep(0, length(onehot_cols))
+monotone_constraints[which(onehot_cols == "Face_Amount_Band")] <- 1  # or -1
 
 params <- list(
   objective = "count:poisson",
@@ -295,7 +293,8 @@ params <- list(
   subsample = 0.6,
   colsample_bytree = 0.8,
   min_child_weight = 500,
-  interaction_constraints = feature_groups
+  interaction_constraints = feature_groups#,
+#  monotone_constraints = monotone_constraints
 )
 
 evals_list <- list(train = dtrain, validation = dvalid)
@@ -307,7 +306,7 @@ xgb_model <- xgb.train(
   early_stopping_rounds = 20,
   print_every_n = 10,
   verbose = 0
-  )
+)
 ```
 
 ## SHAP Feature Importance
@@ -563,7 +562,7 @@ glm_baseline_interactions <- glm(f$baseline_interactions, dt_train,
                                   family = "poisson", offset = log(Policies_Exposed))
 ```
 
-## Baseline model
+## Baseline model with interactions identified by XGBoost
 ```{r }
 DT::datatable(
   glm_rr_table(glm_baseline_interactions),
@@ -616,15 +615,15 @@ dt_test[, c("pred_LASSO_baseline_interactions") :=
 -- This decision was made as it was felt that a tree depth of 3 (the default), results in (very) hard to explain third order variable interactions. 
 
 ```{r IBLM}
-xcols <- c(names(dt_tr[, 1:9]), "Policies_Exposed")
+xcols <- c(names(dt_tr[, c(1:3, 5:9), with = FALSE]), "Policies_Exposed")
 
 base_params <- list(
   seed = 1234,
   eta = 0.1,
   subsample = 0.6,
   colsample_bytree = 0.8,
-  min_child_weight = 500#, # Note IBLM performs worse with these interaction constraints (possibly because the baseline model is not that strong)
-  #interaction_constraints = feature_groups
+  min_child_weight = 500,
+  interaction_constraints = feature_groups
 )
 
 df_list <- list(
@@ -702,25 +701,35 @@ for(model_name in names(models)) {
 }
 ```
 
-# Evaluate model performance
-- Poisson deviance is the correct metric, however standardisation is required in order to compare train and test data performance. <br>
--- Average Poisson deviance is incorrect since exposure per row ranges from a single day to 5,502 years. <br> <br>
+```{r load in Python GAM predictions, include = FALSE}
+GAM_preds <- arrow::read_parquet(here::here("Data/Final Model Predictions_v3.parquet"))
+GAM_preds[is_test, ]
 
-<b>Metrics</b>
--- <b>Preferred Metric</b>: mean Poisson deviance, weighted by ILEC expected claims (i.e. Poisson deviance per expected claim). <br>
--- Metric: mean Poisson deviance, weighted by life year exposure (i.e. Poisson deviance per predicted claim). <br>
---- Downside is that low risk life years (e.g. 20 year olds) given the same weight as high risk life years (e.g. 80 year olds) <br>
--- Metric: mean Poisson deviance, weighted by actual claims (i.e. Poisson deviance per predicted claim). <br>
---- Downside is that entries without claims are ignored, so this metric does not protect well against overprediction of claims. <br><br>
+dt_test <- cbind(
+  dt_test,
+  GAM_preds[is_test, ]
+  ) %>% data.table
+
+dt_train <- cbind(
+  dt_train,
+  GAM_preds[!is_test, ]
+  ) %>% data.table
+```
+
+# Evaluate model performance
+- Evaluation by average Poisson Deviance. 
 
 ``` {r, results = 'asis', echo = F}
 dev_term <- stats::poisson()$dev.resids
 
 pred_spec <- c(
   GLM_baseline                 = "pred_baseline",
+  GAM_baseline                 = "ypred_death_count",
   GLM_baseline_interactions    = "pred_baseline_interactions",
+  GAM_baseline_interactions    = "ypred_final_death_count",
   LASSO_baseline_interactions  = "pred_LASSO_baseline_interactions",
-  XGBoost                      = "pred_xgboost",
+  XGBoost_GLMbase             = "pred_xgboost",
+  XGBoost_GAMbase             = "ypred_xgb_death_count",
   ILEC_basis                   = "ExpDth_VBT2015wMI_Cnt"
 )
 
@@ -736,32 +745,22 @@ models <- imap(pred_spec, ~ list(
   test_pred  = dt_test[[.x]]
 ))
 
-weights <- list(
-  unweighted = list(train = rep(1, nrow(dt_train)), test = rep(1, nrow(dt_test))),
-  wpred      = list(train = dt_train$ExpDth_VBT2015wMI_Cnt, test = dt_test$ExpDth_VBT2015wMI_Cnt),
-  wexposure  = list(train = dt_train$Policies_Exposed,      test = dt_test$Policies_Exposed),
-  wclaims    = list(train = dt_train$Death_Count,           test = dt_test$Death_Count)
-)
-
-mean_pois_dev <- function(y, mu, wt) mean(dev_term(y, mu, wt = wt))
+# Mean Poisson deviance (unweighted)
+mean_pois_dev <- function(y, mu) {
+  mean(dev_term(y, mu, wt = 1))
+}
 
 comparison <- imap_dfr(models, function(m, nm) {
-  data.table(
-    Model               = nm,
-    avgPoisdev_train    = mean_pois_dev(dt_train$Death_Count, m$train_pred, weights$unweighted$train),
-    avgPoisdev_test     = mean_pois_dev(dt_test$Death_Count,  m$test_pred,  weights$unweighted$test),
-    Poisdev_train_wpred = mean_pois_dev(dt_train$Death_Count, m$train_pred, weights$wpred$train),
-    Poisdev_test_wpred  = mean_pois_dev(dt_test$Death_Count,  m$test_pred,  weights$wpred$test),
-    Poisdev_train_wexposure = mean_pois_dev(dt_train$Death_Count, m$train_pred, weights$wexposure$train),
-    Poisdev_test_wexposure  = mean_pois_dev(dt_test$Death_Count,  m$test_pred,  weights$wexposure$test),
-    Poisdev_train_wclaims   = mean_pois_dev(dt_train$Death_Count, m$train_pred, weights$wclaims$train),
-    Poisdev_test_wclaims    = mean_pois_dev(dt_test$Death_Count,  m$test_pred,  weights$wclaims$test)
+  data.table::data.table(
+    Model            = nm,
+    avgPoisdev_train = mean_pois_dev(dt_train$Death_Count, m$train_pred),
+    avgPoisdev_test  = mean_pois_dev(dt_test$Death_Count,  m$test_pred)
   )
 })
 
 DT::datatable(comparison) |>
   DT::formatSignif(
-    columns = setdiff(names(comparison), "Model"),
+    columns = c("avgPoisdev_train", "avgPoisdev_test"),
     digits = 4
   )
 ```
