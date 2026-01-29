@@ -224,41 +224,18 @@ dt_test[, c("pred_baseline") := predict(glm_baseline, dt_test, newoffset = dt_te
 
 ## Model Training
 ```{r XGBoost, include = FALSE}
-if(isTRUE(test_calendaryear)){
-  years_sorted <- sort(unique(dt_train$Observation_Year))
-  test_years <- tail(years_sorted, 1)
-  is_validation <- dt_train$Observation_Year %in% test_years
-} else {
-  train_rows <- nrow(dt_train)
-  test_rows <- sample(train_rows, floor(0.2 * train_rows))
-  is_validation <- rownames(dt_train) %in% test_rows 
-  }
-
 feature_cols <- names(dt_train)[1:8]
 
-dt_tr <- dt_train[!is_validation,]
-dt_va <- dt_train[is_validation,]
+y_tr <- dt_train[["Death_Count"]]
+offset_tr <- log(dt_train[["pred_baseline"]])
 
-# Targets and offsets
-y_tr <- dt_tr[["Death_Count"]]
-y_va <- dt_va[["Death_Count"]]
-offset_tr <- log(dt_tr[["pred_baseline"]])
-offset_va <- log(dt_va[["pred_baseline"]])
-
-# Build a formula for the selected features, ex-intercept since we one-hot encode
 f$XGBoost <- as.formula(
   paste("~", paste(feature_cols, collapse = " + "), "- 1"))
 
-# One-hot encode
-X_tr <- onehot_encode(dt_tr[, 1:8], f$XGBoost)
-X_va <- onehot_encode(dt_va[, 1:8], f$XGBoost)
+X_tr <- onehot_encode(dt_train[, 1:8], f$XGBoost)
 
-# DMatrices
 dtrain <- xgb.DMatrix(data = X_tr, label = y_tr)
 setinfo(dtrain, "base_margin", offset_tr)
-
-dvalid <- xgb.DMatrix(data = X_va, label = y_va)
-setinfo(dvalid, "base_margin", offset_va)
 
 onehot_cols <- colnames(X_tr)
 sex_features <- c("SexF", "SexM")
@@ -266,12 +243,11 @@ smoker_features <- c("Smoker_StatusNS", "Smoker_StatusS")
 numeric_features <- c("Observation_Year", "Issue_Year", "Duration", "Attained_Age", "Face_Amount_Band")
 
 feature_groups <- list()
-
 all_combinations <- expand.grid(
   sex = sex_features,
   smoker = smoker_features,
   stringsAsFactors = FALSE
-  )
+)
 
 for(i in 1:nrow(all_combinations)) {
   combo_features <- c(
@@ -297,14 +273,22 @@ params <- list(
 #  monotone_constraints = monotone_constraints
 )
 
-evals_list <- list(train = dtrain, validation = dvalid)
-xgb_model <- xgb.train(
+xgb_cv <- xgb.cv(
   params = params,
   data = dtrain,
   nrounds = 2000,
-  evals = evals_list,
+  nfold = 5, 
   early_stopping_rounds = 20,
   print_every_n = 10,
+  verbose = 0
+)
+
+best_nrounds <- xgb_cv$early_stop$best_iteration
+
+xgb_model <- xgb.train(
+  params = params,
+  data = dtrain,
+  nrounds = best_nrounds,
   verbose = 0
 )
 ```
