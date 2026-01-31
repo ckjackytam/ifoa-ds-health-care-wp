@@ -289,7 +289,7 @@ class OptunaGamObjective:
 
             ypred_valid["ypred_0"] = gam_model.predict(self.X_valid)
             ypred_valid["weight"] = self.w_valid
-            ypred_valid["ypred"] = ypred_valid[i]["ypred_0"] * ypred_valid[i]["weight"]
+            ypred_valid["ypred"] = ypred_valid["ypred_0"] * ypred_valid["weight"]
             ypred_valid["claim_count"] = self.y_valid * self.w_valid
 
             poisson_loss = total_poisson_dev(
