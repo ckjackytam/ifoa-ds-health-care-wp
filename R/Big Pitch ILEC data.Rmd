@@ -1,7 +1,7 @@
 ---
 title: "ILEC data analysis"
 author: "Michiel Luteijn"
-date: '2025-12-16'
+date: "`r format(Sys.Date(), '%Y-%m-%d')`"
 output:
   html_document:
     theme: cosmo
@@ -187,13 +187,25 @@ dt_test <- ilec[ is_test, , drop = FALSE]
 ```
 
 ```{r feature engineering}
-age_coefs <- attr(poly(dt_train$Attained_Age, 3), "coefs")
-entry_age_coefs <- attr(poly(dt_train$Issue_Age, 3), "coefs")
-obs_year_coefs <- attr(poly(dt_train$Observation_Year, 3), "coefs")
-issue_year_coefs <- attr(poly(dt_train$Issue_Year, 3), "coefs")
+train_out <- gen_features(dt_train)
+specs <- train_out$specs
 
-dt_train <- gen_features(dt_train, age_coefs, entry_age_coefs, obs_year_coefs, issue_year_coefs)
-dt_test <- gen_features(dt_test, age_coefs, entry_age_coefs, obs_year_coefs, issue_year_coefs)
+test_out <- gen_features(
+  dt_test,
+  age_coefs        = specs$poly$age_coefs,
+  entry_age_coefs  = specs$poly$entry_age_coefs,
+  obs_year_coefs   = specs$poly$obs_year_coefs,
+  issue_year_coefs = specs$poly$issue_year_coefs,
+  attained_age_spline_spec = specs$splines$attained_age_spline_spec,
+  duration_spline_spec     = specs$splines$duration_spline_spec,
+  obs_year_spline_spec     = specs$splines$obs_year_spline_spec,
+  factor_cols = specs$factors$factor_cols,
+  map_unseen_factor_to_other = specs$factors$map_unseen_factor_to_other,
+  other_label = specs$factors$other_label
+)
+
+dt_train <- train_out$dataset
+dt_test <- test_out$dataset
 ```
 
 ```{r GLM baseline}
@@ -555,7 +567,7 @@ cv_baseline_interactions <- cv.glmnet(
     y = y_train,
     family = "poisson",
     offset = offset_train,
-    alpha = 1,  # 1 = lasso, 0 = ridge, 0 < alpha < 1 = elastic net
+    alpha = 1,
     nfolds = 10
 )
 
@@ -635,6 +647,66 @@ for (d in depths) {
 #arrow::write_parquet(ilec, "Data/ILEC_2012_19_aggregated_20260123.parquet")
 ```
 
+# Elastic Net
+- Fit using baseline regression formula and Fiona regression formula
+
+## Baseline formula
+```{r }
+X_train <- model.matrix(formula(glm_baseline), data = dt_train)[, -1]
+y_train <- dt_train$Death_Count
+offset_train <- log(dt_train$Policies_Exposed)
+X_test  <- model.matrix(formula(glm_baseline), data = dt_test)[, -1]
+
+cv_en_baseline <- cv.glmnet(
+  x = X_train,
+  y = y_train,
+  family   = "poisson",
+  offset   = offset_train,
+  alpha    = 0.5,
+  nfolds   = 10,
+  standardize = TRUE
+)
+
+dt_test[, c("glmnet_baseline_1se") := predict(cv_en_baseline, X_test, newoffset = log(dt_test$Policies_Exposed), s = "lambda.1se") %>% exp]
+dt_test[, c("glmnet_baseline_min") := predict(cv_en_baseline, X_test, newoffset = log(dt_test$Policies_Exposed), s = "lambda.min") %>% exp]
+dt_train[, c("glmnet_baseline_1se") := predict(cv_en_baseline, X_train, newoffset = offset_train, s = "lambda.1se") %>% exp]
+dt_train[, c("glmnet_baseline_min") := predict(cv_en_baseline, X_train, newoffset = offset_train, s = "lambda.min") %>% exp]
+```
+
+
+## Spline formula
+```{r }
+f$spline_formula <- 
+  Death_Count ~ 
+  bs(Attained_Age, df = 6) +
+  bs(Duration,     df = 5) +
+  Sex + Smoker_Status + Face_Amount_Band +
+  ns(Observation_Year, df = 4)
+
+y_train       <- dt_train$Death_Count
+offset_train  <- log(dt_train$Policies_Exposed)
+offset_test   <- log(dt_test$Policies_Exposed)
+
+preds <- names(dt_train)[grepl("dur_bs_|agespline|obs_ns_", names(dt_train))]
+X_train <- cbind(dt_train[, preds, with = FALSE], X_train[, grepl("Face|Sex|Smoker", colnames(X_train))]) %>% as.matrix
+X_test <- cbind(dt_test[, preds, with = FALSE], X_test[, grepl("Face|Sex|Smoker", colnames(X_test))]) %>% as.matrix
+
+cv_en_splines <- cv.glmnet(
+  x = X_train,
+  y = y_train,
+  family      = "poisson",
+  offset      = offset_train,
+  alpha       = 0.5,
+  nfolds      = 10,
+  standardize = TRUE
+)
+
+dt_test[, c("glmnet_splines_1se") := predict(cv_en_splines, X_test, newoffset = log(dt_test$Policies_Exposed), s = "lambda.1se") %>% exp]
+dt_test[, c("glmnet_splines_min") := predict(cv_en_splines, X_test, newoffset = log(dt_test$Policies_Exposed), s = "lambda.min") %>% exp]
+dt_train[, c("glmnet_splines_1se") := predict(cv_en_splines, X_train, newoffset = offset_train, s = "lambda.1se") %>% exp]
+dt_train[, c("glmnet_splines_min") := predict(cv_en_splines, X_train, newoffset = offset_train, s = "lambda.min") %>% exp]
+```
+
 # Visuals of model fits {.tabset}
 - Note the fit of the ILEC expected basis is poor, because it is not calibrated to this specific dataset. <br>
 
@@ -644,7 +716,8 @@ models <- c("Baseline GLM" = "pred_baseline",
             "IBLM_depth2" = "pred_IBLM_d2", 
             "Baseline GLM Interactions" = "pred_baseline_interactions",
             "LASSO Interactions" = "pred_LASSO_baseline_interactions",
-            "ILEC_Basis" = "ExpDth_VBT2015wMI_Cnt")
+            "ILEC_Basis" = "ExpDth_VBT2015wMI_Cnt",
+            "Enet_splines" = "glmnet_splines_min")
 
 actual_col <- "Death_Count"
 
@@ -675,7 +748,7 @@ for(model_name in names(models)) {
 ```
 
 ```{r load in Python GAM predictions, include = FALSE}
-GAM_preds <- arrow::read_parquet(here::here("Data/Final Model Predictions_v3.parquet"))
+GAM_preds <- arrow::read_parquet(here::here("Data/Final Model Predictions_v4.parquet"))
 GAM_preds[is_test, ]
 
 dt_test <- cbind(
@@ -703,7 +776,11 @@ pred_spec <- c(
   LASSO_baseline_interactions  = "pred_LASSO_baseline_interactions",
   XGBoost_GLMbase             = "pred_xgboost",
   XGBoost_GAMbase             = "ypred_xgb_death_count",
-  ILEC_basis                   = "ExpDth_VBT2015wMI_Cnt"
+  ILEC_basis                   = "ExpDth_VBT2015wMI_Cnt",
+  baselineElasticNet_1se = "glmnet_baseline_1se",
+  baselineElasticNet_min = "glmnet_baseline_min",
+  splinesElasticNet_1se = "glmnet_splines_1se",
+  splinesElasticNet_min = "glmnet_splines_min"
 )
 
 iblm_spec <- setNames(
