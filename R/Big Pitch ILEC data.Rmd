@@ -216,7 +216,7 @@ f$baseline <- stats::as.formula(
 glm_baseline <- glm(as.formula(f$baseline), dt_train, family = "poisson", offset = log(Policies_Exposed))
 ```
 
-# Baseline model
+# Baseline model regression coefficients
 ```{r }
 DT::datatable(
   glm_rr_table(glm_baseline),
@@ -541,7 +541,7 @@ glm_baseline_interactions <- glm(f$baseline_interactions, dt_train,
                                   family = "poisson", offset = log(Policies_Exposed))
 ```
 
-## Baseline model with interactions identified by XGBoost
+## Regression coefficients
 ```{r }
 DT::datatable(
   glm_rr_table(glm_baseline_interactions),
@@ -591,7 +591,8 @@ dt_test[, c("pred_LASSO_baseline_interactions") :=
 
 # IBLM models
 - IBLM models were build with tree depth 1, 2 and 3 on the booster XGBoost model. <br>
--- This decision was made as it was felt that a tree depth of 3 (the default),st_rows 
+-- This decision was made as it was felt that a tree depth of 3 (the default) is hard to interpret. <br>
+
 ```{r IBLM}
 if(isTRUE(test_calendaryear)){
   years_sorted <- sort(unique(dt_train$Observation_Year))
@@ -707,6 +708,36 @@ dt_train[, c("glmnet_splines_1se") := predict(cv_en_splines, X_train, newoffset 
 dt_train[, c("glmnet_splines_min") := predict(cv_en_splines, X_train, newoffset = offset_train, s = "lambda.min") %>% exp]
 ```
 
+# GLM supplemented with interactions identified by Light GBM 
+- Light GBM ran by Fiona, currently not (yet) in script <br>
+
+```{r GLM LGBM informed}
+glm_lgbminformed <-
+  glm(
+    Death_Count ~ 
+      bs(Attained_Age, df = 6, knots = c(35,55,70)) +          # cubic B-spline (df ~ knots)
+      bs(Duration,     df = 5, knots = c(3,5,12)) +
+      Sex + Smoker_Status + Face_Amount_Band:ns(Attained_Age, knots = c(35,55,70)) +
+      ns(Observation_Year,  df = 4),       # mild calendar trend
+    offset = log(Policies_Exposed),
+    family = poisson(link = "log"),
+    data   = dt_train
+  )
+
+dt_train[, c("lgbm_glm") := predict(glm_lgbminformed, dt_train, newoffset = dt_train$Policies_Exposed) %>% exp]
+dt_test[, c("lgbm_glm") := predict(glm_lgbminformed, dt_test, newoffset = dt_test$Policies_Exposed) %>% exp]
+```
+
+## Regression coefficients
+```{r }
+DT::datatable(
+  glm_rr_table(glm_lgbminformed),
+  rownames = FALSE,
+  extensions = "Buttons",
+  options = glm_dt_options()
+) %>% glm_dt_format()
+```
+
 # Visuals of model fits {.tabset}
 - Note the fit of the ILEC expected basis is poor, because it is not calibrated to this specific dataset. <br>
 
@@ -780,7 +811,8 @@ pred_spec <- c(
   baselineElasticNet_1se = "glmnet_baseline_1se",
   baselineElasticNet_min = "glmnet_baseline_min",
   splinesElasticNet_1se = "glmnet_splines_1se",
-  splinesElasticNet_min = "glmnet_splines_min"
+  splinesElasticNet_min = "glmnet_splines_min",
+  LGBM_informedGLM = "lgbm_glm"
 )
 
 iblm_spec <- setNames(
