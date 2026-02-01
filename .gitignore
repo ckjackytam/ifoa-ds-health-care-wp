@@ -24,5 +24,7 @@ Python/big-pitch/export/Final Model Predictions_v3.parquet
 Python/big-pitch/export/Final Model Predictions_v4.parquet
 Python/big-pitch/export/Final Model Predictions_cy_split.parquet
 Python/big-pitch/export/Modelling_data (Filtered and Grouped by Selected Features)_ml.parquet
+Python/big-pitch/archive/04 - Final Model with Interaction (Take Out Duration interactions)).ipynb
+Python/big-pitch/export/Final Model Predictions_v3b.parquet
 Python/big-pitch/input/ILEC_2012_19 - 20240429.txt
 testing
