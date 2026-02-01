@@ -273,17 +273,19 @@ class OptunaGamObjective:
             self.lam_cat_inter_range[1],
             log=self.lam_cat_inter_range[2],
         )
-        gam_model = GAM(
-            eval(self.term_string),
-            distribution="poisson",
-            link="log",
-        ).fit(
-            self.X_train,
-            self.y_train,
-            weights=self.w_train,
-        )
+       
 
         try:
+
+            gam_model = GAM(
+                eval(self.term_string),
+                distribution="poisson",
+                link="log",
+            ).fit(
+                self.X_train,
+                self.y_train,
+                weights=self.w_train,
+            )
             # Perform out-of-fold model scoring
             ypred_valid = pd.DataFrame(index=self.X_valid.index)
 
@@ -296,7 +298,7 @@ class OptunaGamObjective:
                 ypred_valid["claim_count"], ypred_valid["ypred"]
             )
 
-        except np.linalg.LinAlgError:
+        except (np.linalg.LinAlgError, ValueError, FloatingPointError):
             poisson_loss = 1e8
 
         return poisson_loss
