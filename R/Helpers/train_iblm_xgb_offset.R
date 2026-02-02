@@ -3,8 +3,9 @@ train_iblm_xgb_offset <- function (df_list, response_var, family = "poisson", pa
                                    verbose = 0, print_every_n = 1L, early_stopping_rounds = 25, 
                                    maximize = NULL, save_period = NULL, save_name = "xgboost.model", 
                                    xgb_model = NULL, callbacks = list(), ..., strip_glm = TRUE,
-                                   offset_var = NULL) 
+                                   offset_var = NULL, seed = 1234) 
 {
+  set.seed(seed)
   IBLM:::check_required_names(df_list, c("train", "validate"))
   IBLM:::check_required_names(df_list[["train"]], response_var)
   IBLM:::check_required_names(df_list[["validate"]], response_var)
