@@ -231,6 +231,185 @@ dt_train[, c("pred_baseline") := predict(glm_baseline, dt_train, newoffset = dt_
 dt_test[, c("pred_baseline") := predict(glm_baseline, dt_test, newoffset = dt_test$Policies_Exposed) %>% exp]
 ```
 
+# XGBoost offset by exposure {.tabset}
+- This model is to inform feature engineering for the XGBoost informed GLM <br>
+
+```{r xgb before feature engineering}
+keep_me <- c("Observation_Year", "Sex", "Smoker_Status", "Duration", "Face_Amount_Band", "Attained_Age")
+
+if(isTRUE(test_calendaryear)){
+  # Where test data is calendar year, need to exclude test data from random split as well to prevent data leakage
+  ilec_rows <- nrow(ilec)
+  test_rows <- sample(ilec_rows, floor(0.2 * ilec_rows))
+  is_test_random_split <- rownames(ilec) %in% test_rows 
+  
+  w_train <- pmax(ilec[!is_test_random_split][!Observation_Year %in% c(2018, 2019)]$Policies_Exposed, .Machine$double.eps)
+  dt_train_first_xgb <- ilec[!is_test_random_split][!Observation_Year %in% c(2018, 2019)]
+} else {
+  w_train <- pmax(ilec[!is_test][!Observation_Year %in% c(2018, 2019)]$Policies_Exposed, .Machine$double.eps)
+  dt_train_first_xgb <- ilec[!is_test][!Observation_Year %in% c(2018, 2019)]
+  }
+
+X_train_first_xgb <- data.matrix(dt_train_first_xgb[, ..keep_me])
+X_test_first_xgb <- data.matrix(dt_test[, ..keep_me])
+
+y_train_first_xgb <- dt_train_first_xgb$Death_Count
+offset_train <- log(w_train)
+
+dtrain_first_xgb <- xgb.DMatrix(data = X_train_first_xgb, label = y_train_first_xgb)
+
+setinfo(dtrain_first_xgb, "base_margin", offset_train)
+
+params_first_xgb <- list(
+  objective = "count:poisson",
+  eval_metric = "poisson-nloglik",
+  eta = 0.1,
+  subsample = 0.8,
+  colsample_bytree = 0.8,
+  tree_method = "hist",
+  grow_policy = "lossguide",  
+  max_leaves = 31,
+  max_depth = 3               
+)
+
+first_xgb_cv <- xgb.cv(
+  params = params_first_xgb,
+  data = dtrain_first_xgb,
+  nrounds = 2000,
+  nfold = 5, 
+  early_stopping_rounds = 20,
+  print_every_n = 10,
+  verbose = 0
+)
+
+best_nrounds_first_xgb <- first_xgb_cv$early_stop$best_iteration
+
+xgb_model_first <- xgb.train(
+  params = params_first_xgb,
+  data = dtrain_first_xgb,
+  nrounds = 2000,
+  verbose = 0
+)
+
+#xgb.importance(xgb_model_first)
+```
+
+## SHAP Feature Importance
+```{r plot SHAP value first xgb}
+shap_contrib_train <- predict(xgb_model_first,X_train_first_xgb, predcontrib = TRUE)
+shap_contrib_test <- predict(xgb_model_first,X_test_first_xgb, predcontrib = TRUE)
+
+colnames(shap_contrib_train) <- c(colnames(X_train_first_xgb), "BIAS")
+colnames(shap_contrib_test)  <- c(colnames(X_test_first_xgb),  "BIAS")
+
+feat_cols <- setdiff(colnames(shap_contrib_train), "BIAS")
+
+global_shap_importance <- sort(
+  colMeans(abs(shap_contrib_train[, feat_cols, drop = FALSE])),
+  decreasing = TRUE
+)
+head(global_shap_importance, 20)
+
+shap_vals <- shap.values(xgb_model_first, X_train_first_xgb)
+exposure_weights <- pmax(w_train, .Machine$double.eps)
+shap_importance <- data.frame(
+  Feature = colnames(shap_vals$shap_score),
+  MeanAbsSHAP = apply(shap_vals$shap_score, 2, function(x) mean(abs(x))) %>% round(6),
+  MeanAbsWeightedSHAP = apply(shap_vals$shap_score, 2, function(x) weighted.mean(abs(x), exposure_weights)) %>% round(6)
+) %>% data.table
+
+shap_importance <- shap_importance[order(-shap_importance$MeanAbsWeightedSHAP), ]
+DT::datatable(shap_importance)
+```
+
+## SHAP Beeswarm Plot
+- On training data <br>
+
+```{r shap_summary_lives_exposure, fig.width=10, fig.height=8}
+w <- pmax(w_train, .Machine$double.eps)
+
+dup_factor <- floor(w_train / max(w_train) * 50)
+dup_factor[dup_factor < 1] <- 1
+
+shap_weighted <- shap_vals$shap_score[rep(seq_len(nrow(shap_vals$shap_score)), dup_factor), ]
+X_weighted    <- X_train_first_xgb[rep(seq_len(nrow(X_train_first_xgb)),dup_factor), ]
+
+shap_dt <- as.data.table(shap_vals$shap_score)
+shap_dt[, ID := .I]
+
+shap_long <- SHAPforxgboost::shap.prep(
+  shap_contrib = shap_vals$shap_score,
+  X_train =X_train_first_xgb 
+)
+
+SHAPforxgboost::shap.plot.summary(shap_long)
+```
+
+## SHAP Beeswarm Plot weighted by exposure
+- The feature importance is based on the mean absolute SHAP, weighted by exposure
+
+```{r weighted single factor plot }
+top_n <- 20
+si_top <- shap_importance[1:min(top_n, .N)]
+
+ggplot(si_top, aes(x = reorder(Feature, MeanAbsWeightedSHAP), 
+                   y = MeanAbsWeightedSHAP)) +
+  geom_col(fill = "#4E79A7") +
+  coord_flip() +
+  geom_text(aes(label = sprintf("%.3f", MeanAbsWeightedSHAP)),
+            hjust = -0.1, size = 3.2) +
+  scale_y_continuous(expand = expansion(mult = c(0, .08))) +
+  labs(
+    title = "Weighted SHAP Feature Importance",
+    subtitle = "Mean absolute SHAP values weighted by exposure",
+    x = NULL,
+    y = "Mean |SHAP| (weighted)"
+  ) +
+  theme_minimal(base_size = 11)
+
+shap_long_weighted <- SHAPforxgboost::shap.prep(
+  shap_contrib = shap_weighted,
+  X_train      = X_weighted
+)
+
+SHAPforxgboost::shap.plot.summary(shap_long_weighted)
+```
+
+## SHAP Dependence Plots{.tabset}
+- On training data. <br>
+- SHAP dependence is visualised on a weighted random sample of 2,000 rows, where sampling probabilities are proportional to life‑year exposure. <br>
+
+```{r SHAP dependence lives exposure, results='asis', echo = F, message = F, warning = F}
+sub_idx <- sample(unique(shap_long$ID), size = 8000, prob = w_train)
+N_features <- pmin(nrow(shap_importance), 10)
+feature_cols <- names(dt_train_first_xgb)[1:8]
+
+for(feature in shap_importance$Feature[1:N_features]){
+  cat(paste0("### ", feature," \n\n"))
+  
+ plot <- shap.plot.dependence(
+    shap_long[ID %in% sub_idx],
+    X = dt_train_first_xgb[sub_idx,],
+    x = feature,
+    color_feature = NULL
+  )
+  
+  feature_values <- dt_train_first_xgb[sub_idx, feature, with = FALSE] %>% unlist
+  if(length(unique(feature_values)) == 2 && all(feature_values %in% c(0, 1, TRUE, FALSE))) {
+    plot <- plot + 
+      scale_x_continuous(
+        breaks = c(0, 1),
+        labels = c("FALSE", "TRUE")
+      )
+  }
+  
+  plotly_obj <- ggplotly(plot)
+  print(htmltools::tagList(plotly_obj))
+  cat('\n\n')
+}
+```
+
+
 # Build XGBoost to probe the GLM fit for deficiencies {.tabset}
 `r if(test_calendaryear) "- For the XGBoost, 2017 is used as test data, whilst 2012-2016 are train data <br>"`
 - The baseline here (i.e. model being evaluated) is the GLM_baseline model <br>
@@ -708,30 +887,30 @@ dt_train[, c("glmnet_splines_1se") := predict(cv_en_splines, X_train, newoffset 
 dt_train[, c("glmnet_splines_min") := predict(cv_en_splines, X_train, newoffset = offset_train, s = "lambda.min") %>% exp]
 ```
 
-# GLM supplemented with interactions identified by Light GBM 
-- Light GBM ran by Fiona, currently not (yet) in script <br>
+# GLM supplemented with interactions identified by XGboost
+- XGBoost ran by Fiona, currently not (yet) in script <br>
 
-```{r GLM LGBM informed}
-glm_lgbminformed <-
+```{r GLM XGBoost informed}
+glm_XGBoostinformed <-
   glm(
     Death_Count ~ 
-      bs(Attained_Age, df = 6, knots = c(35,55,70)) +          # cubic B-spline (df ~ knots)
-      bs(Duration,     df = 5, knots = c(3,5,12)) +
-      Sex + Smoker_Status + Face_Amount_Band:ns(Attained_Age, knots = c(35,55,70)) +
-      ns(Observation_Year,  df = 4),       # mild calendar trend
+      bs(Attained_Age, df = 6, knots = c(25,33,45,55,70)) + 
+      bs(Duration,     df = 5, knots = c(2,6,15)) +
+      Sex + Smoker_Status + Face_Amount_Band:ns(Attained_Age, knots = c(25,33,45,55,70)) +
+      obs_ns_1 + obs_ns_2 + obs_ns_3 + obs_ns_4,       # mild calendar trend
     offset = log(Policies_Exposed),
     family = poisson(link = "log"),
     data   = dt_train
   )
 
-dt_train[, c("lgbm_glm") := predict(glm_lgbminformed, dt_train, newoffset = dt_train$Policies_Exposed) %>% exp]
-dt_test[, c("lgbm_glm") := predict(glm_lgbminformed, dt_test, newoffset = dt_test$Policies_Exposed) %>% exp]
+dt_train[, c("XGBoost_glm") := predict(glm_XGBoostinformed, dt_train, newoffset = dt_train$Policies_Exposed) %>% exp]
+dt_test[, c("XGBoost_glm") := predict(glm_XGBoostinformed, dt_test, newoffset = dt_test$Policies_Exposed) %>% exp]
 ```
 
 ## Regression coefficients
 ```{r }
 DT::datatable(
-  glm_rr_table(glm_lgbminformed),
+  glm_rr_table(glm_XGBoostinformed),
   rownames = FALSE,
   extensions = "Buttons",
   options = glm_dt_options()
@@ -812,7 +991,7 @@ pred_spec <- c(
   baselineElasticNet_min = "glmnet_baseline_min",
   splinesElasticNet_1se = "glmnet_splines_1se",
   splinesElasticNet_min = "glmnet_splines_min",
-  LGBM_informedGLM = "lgbm_glm"
+  XGBoost_informedGLM = "XGBoost_glm"
 )
 
 iblm_spec <- setNames(
