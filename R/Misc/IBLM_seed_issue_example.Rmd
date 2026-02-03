@@ -1,0 +1,78 @@
+---
+title: "IBLM Seed issue"
+author: "Michiel Luteijn"
+date: "`r format(Sys.Date(), '%Y-%m-%d')`"
+output:
+  html_document:
+    theme: cosmo
+    toc: yes
+    toc_float: yes
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r package install, results=FALSE, message=FALSE, warning=FALSE, include = F}
+packages <- c("data.table", "dplyr", "magrittr", "purrr", "knitr", "stringr", "plyr", "arrow", "IBLM", "xgboost")
+
+for (pkg in packages){
+  if(!pkg %in% rownames(installed.packages())){
+    install.packages(pkg)
+  } 
+}
+library("purrr")
+quietly(lapply(packages, library, character.only = T)) %>% suppressWarnings()
+
+rm(packages, pkg)
+quietly(gc())
+```
+
+# Fix seed
+```{r, include=FALSE, echo=FALSE}
+set.seed(1234)
+```
+
+```{r params}
+base_params <- list(
+  objective = "count:poisson",
+  eval_metric = "poisson-nloglik",
+  eta = 0.05,
+  max_depth = 2,
+  subsample = 0.8481199902343008,
+  colsample_bytree = 0.8927827854324062,
+  colsample_bylevel = 0.5957761252433638,
+  gamma = 4.855912520832532e-06,
+  min_child_weight = 412)
+```
+
+# IBLM no seed issue as params not defined
+```{r IBLM no seed issue}
+library("IBLM")
+df_list <- freMTPLmini |> split_into_train_validate_test(seed = 9000)
+
+for(i in 1:5){
+  iblm_model <- train_iblm_xgb(
+    df_list,
+    response_var = "ClaimRate",
+    family = "poisson"
+  )
+  length_dump <- length(xgb.dump(iblm_model$booster_model, with_stats = FALSE))  
+  print(length_dump)
+}
+```
+# IBLM seed issue with costum params
+
+```{r IBLM seed issue}
+for(i in 1:5){
+  iblm_model <- train_iblm_xgb(
+    df_list,
+    response_var = "ClaimRate",
+    params = base_params,
+    family = "poisson"
+  )
+  length_dump <- length(xgb.dump(iblm_model$booster_model, with_stats = FALSE))  
+  print(length_dump)
+}
+```
