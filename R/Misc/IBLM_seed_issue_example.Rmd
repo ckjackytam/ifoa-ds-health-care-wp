@@ -76,3 +76,8 @@ for(i in 1:5){
   print(length_dump)
 }
 ```
+
+# Session Info
+```{r}
+sessionInfo()
+```
