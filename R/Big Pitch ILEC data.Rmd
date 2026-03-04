@@ -231,6 +231,31 @@ dt_train[, c("pred_baseline") := predict(glm_baseline, dt_train, newoffset = dt_
 dt_test[, c("pred_baseline") := predict(glm_baseline, dt_test, newoffset = dt_test$Policies_Exposed) %>% exp]
 ```
 
+# Baseline LASSO
+- Fit using baseline regression formula
+
+```{r }
+X_train <- model.matrix(formula(glm_baseline), data = dt_train)[, -1]
+y_train <- dt_train$Death_Count
+offset_train <- log(dt_train$Policies_Exposed)
+X_test  <- model.matrix(formula(glm_baseline), data = dt_test)[, -1]
+
+cv_LASSO_baseline <- cv.glmnet(
+  x = X_train,
+  y = y_train,
+  family   = "poisson",
+  offset   = offset_train,
+  alpha    = 1,
+  nfolds   = 10,
+  standardize = TRUE
+)
+
+dt_test[, c("LASSO_baseline_1se") := predict(cv_LASSO_baseline, X_test, newoffset = log(dt_test$Policies_Exposed), s = "lambda.1se") %>% exp]
+dt_test[, c("LASSO_baseline_min") := predict(cv_LASSO_baseline, X_test, newoffset = log(dt_test$Policies_Exposed), s = "lambda.min") %>% exp]
+dt_train[, c("LASSO_baseline_1se") := predict(cv_LASSO_baseline, X_train, newoffset = offset_train, s = "lambda.1se") %>% exp]
+dt_train[, c("LASSO_baseline_min") := predict(cv_LASSO_baseline, X_train, newoffset = offset_train, s = "lambda.min") %>% exp]
+```
+
 # XGBoost offset by exposure {.tabset}
 - This model is to inform feature engineering for the XGBoost informed GLM <br>
 
@@ -827,66 +852,6 @@ for (d in depths) {
 #arrow::write_parquet(ilec, "Data/ILEC_2012_19_aggregated_20260123.parquet")
 ```
 
-# Elastic Net
-- Fit using baseline regression formula and Fiona regression formula
-
-## Baseline formula
-```{r }
-X_train <- model.matrix(formula(glm_baseline), data = dt_train)[, -1]
-y_train <- dt_train$Death_Count
-offset_train <- log(dt_train$Policies_Exposed)
-X_test  <- model.matrix(formula(glm_baseline), data = dt_test)[, -1]
-
-cv_en_baseline <- cv.glmnet(
-  x = X_train,
-  y = y_train,
-  family   = "poisson",
-  offset   = offset_train,
-  alpha    = 0.5,
-  nfolds   = 10,
-  standardize = TRUE
-)
-
-dt_test[, c("glmnet_baseline_1se") := predict(cv_en_baseline, X_test, newoffset = log(dt_test$Policies_Exposed), s = "lambda.1se") %>% exp]
-dt_test[, c("glmnet_baseline_min") := predict(cv_en_baseline, X_test, newoffset = log(dt_test$Policies_Exposed), s = "lambda.min") %>% exp]
-dt_train[, c("glmnet_baseline_1se") := predict(cv_en_baseline, X_train, newoffset = offset_train, s = "lambda.1se") %>% exp]
-dt_train[, c("glmnet_baseline_min") := predict(cv_en_baseline, X_train, newoffset = offset_train, s = "lambda.min") %>% exp]
-```
-
-
-## Spline formula
-```{r }
-f$spline_formula <- 
-  Death_Count ~ 
-  bs(Attained_Age, df = 6) +
-  bs(Duration,     df = 5) +
-  Sex + Smoker_Status + Face_Amount_Band +
-  ns(Observation_Year, df = 4)
-
-y_train       <- dt_train$Death_Count
-offset_train  <- log(dt_train$Policies_Exposed)
-offset_test   <- log(dt_test$Policies_Exposed)
-
-preds <- names(dt_train)[grepl("dur_bs_|agespline|obs_ns_", names(dt_train))]
-X_train <- cbind(dt_train[, preds, with = FALSE], X_train[, grepl("Face|Sex|Smoker", colnames(X_train))]) %>% as.matrix
-X_test <- cbind(dt_test[, preds, with = FALSE], X_test[, grepl("Face|Sex|Smoker", colnames(X_test))]) %>% as.matrix
-
-cv_en_splines <- cv.glmnet(
-  x = X_train,
-  y = y_train,
-  family      = "poisson",
-  offset      = offset_train,
-  alpha       = 0.5,
-  nfolds      = 10,
-  standardize = TRUE
-)
-
-dt_test[, c("glmnet_splines_1se") := predict(cv_en_splines, X_test, newoffset = log(dt_test$Policies_Exposed), s = "lambda.1se") %>% exp]
-dt_test[, c("glmnet_splines_min") := predict(cv_en_splines, X_test, newoffset = log(dt_test$Policies_Exposed), s = "lambda.min") %>% exp]
-dt_train[, c("glmnet_splines_1se") := predict(cv_en_splines, X_train, newoffset = offset_train, s = "lambda.1se") %>% exp]
-dt_train[, c("glmnet_splines_min") := predict(cv_en_splines, X_train, newoffset = offset_train, s = "lambda.min") %>% exp]
-```
-
 # GLM supplemented with interactions identified by XGboost
 - XGBoost ran by Fiona, currently not (yet) in script <br>
 
@@ -917,17 +882,40 @@ DT::datatable(
 ) %>% glm_dt_format()
 ```
 
+```{r load in Python GAM predictions, include = FALSE}
+if(test_calendaryear){
+  GAM_preds <- arrow::read_parquet(here::here("Data/Final Model Predictions_cy_split.parquet"))
+} else{
+  GAM_preds <- arrow::read_parquet(here::here("Data/Final Model Predictions_v4.parquet"))
+}
+GAM_preds[is_test, ]
+
+dt_test <- cbind(
+  dt_test,
+  GAM_preds[is_test, ]
+  ) %>% data.table
+
+dt_train <- cbind(
+  dt_train,
+  GAM_preds[!is_test, ]
+  ) %>% data.table
+```
+
 # Visuals of model fits {.tabset}
-- Note the fit of the ILEC expected basis is poor, because it is not calibrated to this specific dataset. <br>
+- Note the fit of the ILEC expected basis is poor, because it is not calibrated to this specific dataset (it was trained on ILEC 2002-2009 data). <br>
 
 ```{r, results = 'asis', echo = FALSE}
 models <- c("Baseline GLM" = "pred_baseline", 
-            "XGBoost" = "pred_xgboost", 
+            "Baseline GAM" = "ypred_death_count",
+            "Baseline LASSO" = "LASSO_baseline_min",
+            "XGBoost-informed GLM" = "XGBoost_glm",
             "IBLM_depth2" = "pred_IBLM_d2", 
             "Baseline GLM Interactions" = "pred_baseline_interactions",
-            "LASSO Interactions" = "pred_LASSO_baseline_interactions",
+            "Baseline LASSO Interactions" = "pred_LASSO_baseline_interactions",
+            "Baseline GAM Interactions" = "ypred_final_death_count",
             "ILEC_Basis" = "ExpDth_VBT2015wMI_Cnt",
-            "Enet_splines" = "glmnet_splines_min")
+            "XGBoost" = "pred_xgboost"
+            )
 
 actual_col <- "Death_Count"
 
@@ -957,21 +945,6 @@ for(model_name in names(models)) {
 }
 ```
 
-```{r load in Python GAM predictions, include = FALSE}
-GAM_preds <- arrow::read_parquet(here::here("Data/Final Model Predictions_v4.parquet"))
-GAM_preds[is_test, ]
-
-dt_test <- cbind(
-  dt_test,
-  GAM_preds[is_test, ]
-  ) %>% data.table
-
-dt_train <- cbind(
-  dt_train,
-  GAM_preds[!is_test, ]
-  ) %>% data.table
-```
-
 # Evaluate model performance
 - Evaluation by average Poisson Deviance. 
 
@@ -987,10 +960,8 @@ pred_spec <- c(
   XGBoost_GLMbase             = "pred_xgboost",
   XGBoost_GAMbase             = "ypred_xgb_death_count",
   ILEC_basis                   = "ExpDth_VBT2015wMI_Cnt",
-  baselineElasticNet_1se = "glmnet_baseline_1se",
-  baselineElasticNet_min = "glmnet_baseline_min",
-  splinesElasticNet_1se = "glmnet_splines_1se",
-  splinesElasticNet_min = "glmnet_splines_min",
+  baselineLASSO_1se = "LASSO_baseline_1se",
+  baselineLASSO_min = "LASSO_baseline_min",
   XGBoost_informedGLM = "XGBoost_glm"
 )
 
