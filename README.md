@@ -75,7 +75,7 @@ The Society of Actuaries has a comprehensive open-source [ILEC mortality dataset
 
 ## 7. Citation
 
-If you use this code or framework in your work, please cite:
+If you use this code or framework in your work, please cite the relevant paper(s):
 
 **Framework:**
 Luteijn, J.M. et al. (2026). *A Framework for Data Science Techniques in Health and Care*. Institute and Faculty of Actuaries. https://actuaries.org.uk/media/ppqhbjfp/a-framework-for-ds-technicques-to-hc-actuarial-20251003.pdf
