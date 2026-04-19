@@ -83,7 +83,7 @@ Luteijn, J.M. et al. (2026). *A Framework for Data Science Techniques in Health 
 **GAM Study:**
 Tam, J., & Luteijn, J.M. (2025). "A new pathway: A framework for incorporating data science into health and care." *The Actuary*. https://www.theactuary.com/2025/07/02/new-pathway-framework-incorporating-data-science-health-and-care
 
-**Hybrid Modelling Study:**
+**Hybrid Modelling:**
 Fan, F., Luteijn, M., & Tam, J. (2026). "Bridging transparency and predictive power: Integrating explainable ML into actuarial modelling." Presented at IFoA Health & Care Big Pitch 2026. https://actuaries.org.uk/media/xikgrpeg/bridging-transparency-and-predictive-power-integrating-explainable-ml-into-actuarial-modelling-fiona-fan-michiel-luteijn-jacky-tam.pdf
 
 
