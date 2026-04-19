@@ -68,7 +68,7 @@ The Society of Actuaries has a comprehensive open-source [ILEC mortality dataset
 
 **Note:** CMI case studies require CMI member data access. ILEC case studies use publicly available SOA data.
 
-## 6. Data sources
+## 6. Data Sources
 
 - [SOA ILEC Mortality Dataset](https://www.soa.org/resources/research-reports/2024/ilec-mort-2012-19/) (open-source)
 - CMI Working Paper 162 (2022) - Term assurance experience 2016-2020 (CMI members only)
