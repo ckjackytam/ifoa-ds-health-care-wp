@@ -28,3 +28,10 @@ Python/big-pitch/archive/04 - Final Model with Interaction (Take Out Duration in
 Python/big-pitch/export/Final Model Predictions_v3b.parquet
 Python/big-pitch/input/ILEC_2012_19 - 20240429.txt
 testing
+Python/build-better-base-gam/setup_env.bat
+Python/build-better-base-gam/venv
+Python/build-better-base-gam/export/gam_modelling_data_v2.parquet
+Python/build-better-base-gam/input/*.xlsb
+Python/build-better-base-gam/output/*.pkl
+Python/build-better-base-gam/output/*.xlsx
+Python/build-better-base-gam/export/*.parquet

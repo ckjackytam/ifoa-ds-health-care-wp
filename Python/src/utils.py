@@ -6,6 +6,7 @@ import seaborn as sns
 from matplotlib import ticker as mtick
 import matplotlib.pyplot as plt
 
+
 def total_poisson_dev(y, y_pred):
     y = np.array(y)
     y_pred = np.array(y_pred)
@@ -13,7 +14,8 @@ def total_poisson_dev(y, y_pred):
     dev = 2 * (nlogn - (y - y_pred))
     return dev.sum()
 
-def pretty_print(x): 
+
+def pretty_print(x):
     print("-" * len(x))
     print(x)
     print("-" * len(x))
@@ -433,216 +435,6 @@ class DoubleLift:
         ax1.set_zorder(1)
 
 
-def actual_vs_predicted(
-    ypred_df,
-    target_tuple,
-    predict_dict,
-    weight,
-    var,
-    is_var_num,
-    banding_loc=None,
-    plot=False,
-    ax=None,
-    log_scale=False,
-    align_predict=True,
-    leftylabel="Frequency",
-    rightylabel="Weight (%)",
-    palette=["#4e79a7", "#f28e2b", "#e15759"],
-    tick_fontsize=14,
-    label_fontsize=18,
-    title_fontsize=22,
-):
-    """
-    Compare actual vs predicted frequencies and optionally plot the results.
-
-    This function processes a DataFrame containing actual and predicted values,
-    calculates frequencies, and optionally creates a plot comparing actual vs
-    predicted frequencies along with a weight distribution.
-
-    Parameters:
-    -----------
-    ypred_df : pandas.DataFrame
-        DataFrame containing the prediction data.
-    target_tuple : tuple
-        A tuple containing the target column name and its display name.
-    predict_dict : dict
-        A dictionary with keys as prediction column names and values as their display names.
-    weight : str
-        The name of the column containing weights.
-    var : str
-        The variable to group by.
-    is_var_num : bool
-        True if the grouping variable is numeric, False otherwise.
-    banding_loc : str, optional
-        Path to an Excel file containing banding information.
-    plot : bool, default False
-        If True, create and display a plot.
-    ax : matplotlib.axes.Axes, optional
-        The axes to plot on. If None, a new figure and axes will be created.
-    log_scale : bool, default False
-        If True, use a logarithmic scale for the frequency axis.
-    align_predict : bool, default True
-        If True, align predictions with actual values.
-    leftylabel : str, default "Frequency"
-        Label for the left y-axis.
-    rightylabel : str, default "Weight (%)"
-        Label for the right y-axis.
-    palette : list, default ["#4e79a7", "#f28e2b", "#e15759"]
-        Color palette for the plot.
-    tick_fontsize : int, default 14
-        Font size for tick labels.
-    label_fontsize : int, default 18
-        Font size for axis labels.
-    title_fontsize : int, default 22
-        Font size for the plot title.
-
-    Returns:
-    --------
-    pandas.DataFrame or None
-        If plot is False, returns a DataFrame with grouped and processed data.
-        If plot is True, returns None and displays the plot.
-
-    Notes:
-    ------
-    - The function groups the data by the specified variable and calculates
-      frequencies for actual and predicted values.
-    - If banding information is provided, it will be used to label the x-axis.
-    - The plot (if requested) shows line plots for actual and predicted frequencies,
-      and a bar plot for weight distribution.
-    """
-
-    df_groupby = ypred_df.groupby(var)[
-        [target_tuple[0], *list(predict_dict.keys()), weight]
-    ].sum()
-
-    df_groupby["baseline_freq"] = (
-        df_groupby[list(predict_dict.keys())[1]] / df_groupby[weight]
-    )
-    df_groupby["new_model_freq"] = (
-        df_groupby[list(predict_dict.keys())[0]] / df_groupby[weight]
-    )
-    df_groupby["actual_freq"] = df_groupby[target_tuple[0]] / df_groupby[weight]
-
-    # Apply base multiplies to the predictions
-    if align_predict:
-        df_groupby["new_model_freq"] *= (
-            df_groupby[target_tuple[0]].sum()
-            / df_groupby[list(predict_dict.keys())[0]].sum()
-        )
-        df_groupby["baseline_freq"] *= (
-            df_groupby[target_tuple[0]].sum()
-            / df_groupby[list(predict_dict.keys())[1]].sum()
-        )
-
-    columns = {
-        "actual_freq": target_tuple[1],
-        "new_model_freq": predict_dict[list(predict_dict.keys())[0]],
-        "baseline_freq": predict_dict[list(predict_dict.keys())[1]],
-    }
-
-    df_groupby.rename(
-        columns=columns,
-        inplace=True,
-    )
-
-    if banding_loc is not None:
-        if is_var_num:
-            banding = pd.read_excel(
-                banding_loc,
-                sheet_name=var.replace("_level", ""),
-            )
-            banding["index"] = range(1, len(banding) + 1)
-            banding.set_index("index", inplace=True)
-            df_groupby = df_groupby.join(banding["Level"])
-            x_index, x_label = select_ticks(
-                df_groupby.index.tolist(), df_groupby["Level"].tolist()
-            )
-        else:
-            mapping = pd.read_excel(banding_loc, sheet_name=var.replace("_cat_level", ""))
-            df_groupby = df_groupby.join(mapping.set_index("Integer_Value"))
-            df_groupby["Categorical_Level"] = df_groupby["Categorical_Level"].astype(
-                str
-            )
-            df_groupby.sort_values("Categorical_Level", inplace=True)
-            x_label = df_groupby["Categorical_Level"].to_list()
-
-    if not is_var_num:
-        df_groupby.index = df_groupby.index.astype(str)
-
-    if plot:
-        sns.lineplot(
-            data=df_groupby[columns.values()],
-            ax=ax,
-            markers=True,
-            palette=palette,
-        )
-
-        if log_scale:
-            ax.set_yscale("log")
-            ax.yaxis.set_major_formatter(
-                mtick.FuncFormatter(lambda y, _: "{:.2%}".format(y))
-            )
-        ax.tick_params(axis="y", which="major", labelsize=tick_fontsize)
-
-        if banding_loc is not None:
-            if is_var_num:
-                ax.xaxis.set_major_locator(mtick.FixedLocator(x_index))
-            ax.set_xticklabels(x_label, fontsize=tick_fontsize)
-
-        ax.set_xlabel("")
-        ax.set_ylabel(
-            leftylabel + " (Log-Scaled)" if log_scale else leftylabel,
-            fontsize=label_fontsize,
-        )
-
-        # Determine the decimal places for the primary y-axis
-        vals = ax.get_yticks()
-        diff = np.min(np.diff(vals))
-        dp = round_down_to_power_of_10(diff)
-        dp = int(max(np.abs(np.log10(dp)) - 2, 0))
-        ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f"{x:.{dp}%}"))
-
-        ax.tick_params(axis="both", which="major", labelsize=tick_fontsize)
-        ax.grid(False)
-
-        df_groupby[weight] /= df_groupby[weight].sum()
-
-        ax1 = ax.twinx()
-        ax1.bar(
-            df_groupby.index,
-            df_groupby[weight],
-            color="lightgray",
-            alpha=0.5,
-            ec="k",
-            label=rightylabel,
-        )
-
-        ax1.tick_params(axis="y", which="major", labelsize=tick_fontsize)
-        ax1.set_ylabel(rightylabel, fontsize=label_fontsize)
-        ax1.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f"{x:.{0}%}"))
-
-        # Combine legends
-        lines, labels = ax.get_legend_handles_labels()
-        bars, bar_labels = ax1.get_legend_handles_labels()
-        ax.legend(
-            lines + bars,
-            labels + bar_labels,
-            loc="best",
-            fontsize=tick_fontsize,
-            facecolor="white",
-        )
-
-        ax.set_title(
-            var.replace("_cat_level", "").replace("_level", ""),
-            fontsize=title_fontsize,
-        )
-        ax.set_zorder(2)
-        ax.patch.set_alpha(0)
-        ax1.set_zorder(1)
-    else:
-        return df_groupby
-
-
 def make_pretty_pivot(styler, format_dict, caption, bar_dict=None):
 
     headers = {
@@ -653,9 +445,9 @@ def make_pretty_pivot(styler, format_dict, caption, bar_dict=None):
     styler.set_caption(caption)
     styler.format(format_dict)
 
-    if bar_dict is not None: 
+    if bar_dict is not None:
         for col, color in bar_dict.items():
-            styler.bar(color=color, subset=col, props="width: 5em;") 
+            styler.bar(color=color, subset=col, props="width: 5em;")
 
     styler.set_table_styles(
         [

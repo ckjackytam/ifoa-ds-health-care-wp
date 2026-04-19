@@ -1,0 +1,28 @@
+# Core data science
+numpy
+pandas
+scipy
+
+# Visualisation
+matplotlib
+seaborn
+
+# Machine learning
+scikit-learn
+xgboost
+pygam
+shap
+optuna
+torch
+
+# Jupyter support
+jupyter
+ipykernel
+ipywidgets
+
+# Others 
+pyarrow
+duckdb
+openpyxl
+graphviz
+pyxlsb

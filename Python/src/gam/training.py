@@ -161,149 +161,6 @@ def create_term_structure(
     return (term_string, num_feat_map, cat_feat_map, interact_term_map)
 
 
-class OptunaGamObjective:
-    """
-    A custom objective class for Optuna optimization of Generalized Additive Models (GAMs).
-
-    This class encapsulates the objective function for Optuna to optimise GAM hyperparameters
-    using a train/validation split. It handles training of GAMs, prediction on the validation set,
-    and calculation of the Poisson deviance for model evaluation.
-
-    Methods:
-        __call__(trial): The objective function to be optimised by Optuna.
-    """
-
-
-    def __init__(
-        self,
-        term_string,
-        n_splines_range,
-        lam_num_range,
-        lam_cat_range,
-        X_train,
-        X_valid,
-        y_train,
-        y_valid,
-        w_train,
-        w_valid,
-        n_splines_inter_range=(4, 4),
-        lam_num_inter_range=(1, 1, False),
-        lam_cat_inter_range=(1, 1, False),
-    ):
-        """
-        Initialize the OptunaGamObjective.
-
-        Parameters:
-        -----------
-        term_string : str
-            The term structure string for the GAM (will be evaluated at runtime).
-        n_splines_range : tuple of (int, int)
-            Range for number of splines (min, max).
-        lam_num_range : tuple of (float, float, bool)
-            Range for numerical smoothing parameters (min, max, log_scale).
-        lam_cat_range : tuple of (float, float, bool)
-            Range for categorical L2 regularisation parameters (min, max, log_scale).
-        X_train : pd.DataFrame
-            Training feature DataFrame.
-        X_valid : pd.DataFrame
-            Validation feature DataFrame.
-        y_train : array-like
-            Training target values.
-        y_valid : array-like
-            Validation target values.
-        w_train : array-like
-            Training sample weights (exposures).
-        w_valid : array-like
-            Validation sample weights (exposures).
-        n_splines_inter_range : tuple of (int, int), optional
-            Range for number of splines in interaction terms (min, max).
-            Defaults to (4, 4) for single-factor models.
-        lam_num_inter_range : tuple of (float, float, bool), optional
-            Range for numerical interaction smoothing parameters (min, max, log_scale).
-            Defaults to (1, 1, False) for single-factor models.
-        lam_cat_inter_range : tuple of (float, float, bool), optional
-            Range for categorical interaction L2 regularisation parameters (min, max, log_scale).
-            Defaults to (1, 1, False) for single-factor models.
-        """
-        self.term_string = term_string
-        self.n_splines_range = n_splines_range
-        self.lam_num_range = lam_num_range
-        self.lam_cat_range = lam_cat_range
-        self.n_splines_inter_range = n_splines_inter_range
-        self.lam_num_inter_range = lam_num_inter_range
-        self.lam_cat_inter_range = lam_cat_inter_range
-        self.X_train = X_train
-        self.X_valid = X_valid
-        self.y_train = y_train
-        self.y_valid = y_valid
-        self.w_train = w_train
-        self.w_valid = w_valid
-
-    def __call__(self, trial):
-
-        n_splines = trial.suggest_int(
-            "n_splines", self.n_splines_range[0], self.n_splines_range[1]
-        )
-        lam_num = trial.suggest_float(
-            "lam_num",
-            self.lam_num_range[0],
-            self.lam_num_range[1],
-            log=self.lam_num_range[2],
-        )
-        lam_cat = trial.suggest_float(
-            "lam_cat",
-            self.lam_cat_range[0],
-            self.lam_cat_range[1],
-            log=self.lam_cat_range[2],
-        )
-        n_splines_inter = trial.suggest_int(
-            "n_splines_inter",
-            self.n_splines_inter_range[0],
-            self.n_splines_inter_range[1],
-        )
-        lam_num_inter = trial.suggest_float(
-            "lam_num_inter",
-            self.lam_num_inter_range[0],
-            self.lam_num_inter_range[1],
-            log=self.lam_num_inter_range[2],
-        )
-        lam_cat_inter = trial.suggest_float(
-            "lam_cat_inter",
-            self.lam_cat_inter_range[0],
-            self.lam_cat_inter_range[1],
-            log=self.lam_cat_inter_range[2],
-        )
-       
-
-        try:
-
-            gam_model = GAM(
-                eval(self.term_string),
-                distribution="poisson",
-                link="log",
-            ).fit(
-                self.X_train,
-                self.y_train,
-                weights=self.w_train,
-            )
-            # Perform out-of-fold model scoring
-            ypred_valid = pd.DataFrame(index=self.X_valid.index)
-
-            ypred_valid["ypred_0"] = gam_model.predict(self.X_valid)
-            ypred_valid["weight"] = self.w_valid
-            ypred_valid["ypred"] = ypred_valid["ypred_0"] * ypred_valid["weight"]
-            ypred_valid["claim_count"] = self.y_valid * self.w_valid
-
-            poisson_loss = total_poisson_dev(
-                ypred_valid["claim_count"], ypred_valid["ypred"]
-            )
-
-        except (np.linalg.LinAlgError, ValueError, FloatingPointError):
-            poisson_loss = 1e8
-
-        return poisson_loss
-
-
 class OptunaGamObjectiveCV:
     """
     A custom objective class for Optuna optimization of Generalized Additive Models (GAMs).
@@ -449,290 +306,262 @@ class OptunaGamObjectiveCV:
         return poisson_loss
 
 
-def extract_relativity(
-    num_feat_map,
-    cat_feat_map,
-    data_df,
-    gam_model,
-    numerical_banding,
-    categorical_banding,
-    weight="weight",
-    base_adj=1,
-    base_pred=None,
-    interact_term_map=None,
-):
+def extract_gam_relativity_num(
+    gam_model: GAM,
+    X_train: pd.DataFrame,
+    w_train: pd.Series,
+    num_feat_map: dict[int, str],
+    weight: str,
+    intercept_adj_list: list[float] = [],
+) -> tuple[dict[str, pd.DataFrame], list[float]]:
     """
-    Extract adjusted intercept and related GAM relativities for numerical and categorical variables
-    and interaction terms.
+    Extract relativities for numerical features from a trained GAM model.
 
-    Parameters:
-    -----------
-    num_feat_map : dict
-        Mapping of the indices of numerical variables to their names.
-    cat_feat_map : dict
-        Mapping of the indices of categorical variables to their names.
-    data_df : pandas.DataFrame
-        DataFrame containing the data used to train the model -  must all the features and a weight
-        column. Feature columns must be in the same order as in training.
-    gam_model : object
-        Trained PyGAM model object.
-    numerical_banding : str
-        Path to Excel file containing banding information for numerical variables.
-    categorical_banding : str
-        Path to Excel file containing banding information for categorical variables.
-    weight : str, optional
-        Name of the weight column in data_df. Default is "weight".
-    base_adj : float, optional
-        Base adjustment factor for the intercept. Default is 1.
-    base_pred : str, optional
-        Name of the base prediction column, i.e, starting points of the model. Default is None.
-    interact_term_map : dict, optional
-        Mapping of the indices of interaction terms to their names. Default is None.
+    Args:
+        gam_model: Fitted PyGAM model.
+        X_train: Training feature dataframe.
+        w_train: Training weights series.
+        num_feat_map: Dictionary mapping term indices to numerical feature names.
+        weight: Column name in the relativity DataFrames that contains the weights
+        intecept_adj_list: A list to store the average relativity for each feature, which can be used to adjust the model intercept.
 
     Returns:
-    --------
-    tuple
-        A tuple containing:
-        1. intercept (float): Adjusted intercept value.
-        2. num_rel_dict (dict): Dictionary of relativities for numerical variables.
-        3. cat_rel_dict (dict): Dictionary of relativities for categorical variables.
-        4. inter_rel_dict (dict or None): Dictionary of relativities for interaction terms, if any.
+        Tuple containing:
+        - Dict mapping each feature name to a DataFrame with relativities
+        - List of intercept adjustments
 
     Raises:
-    -------
-    AssertionError
-        If there are duplicated numerical or categorical variables, or if interaction terms
-        contain variables not found in num_feat_map or cat_feat_map.
-
-    Notes:
-    ------
-    - The function assumes that the last coefficient in the GAM model is the intercept.
-    - For numerical variables, predictions outside the range of training data are capped at the min/max values.
-    - For categorical variables, levels not seen in training data are assigned the relativity of the most frequent level.
-    - Relativities are adjusted so that the weighted average level is 1 for each variable.
-    - The intercept is adjusted based on the product of all average relativities and the base adjustment.
+        AssertionError: If there are missing levels in the numerical range of any feature.
     """
-
-    assert len(set(num_feat_map.values())) == len(
-        num_feat_map
-    ), "Duplicated numerical variables found."
-    assert len(set(cat_feat_map.values())) == len(
-        cat_feat_map
-    ), "Duplicated categorical variables found."
-
-    # Define the feature dataframe - must be the same as the one used to train the model
-    feature_df = data_df.drop(columns=[weight])
-
-    # Calculate the total number of factors used by the model
-    number_factors = len(feature_df)
-    # Extract the intercept value from the model (assume the last coefficient is the intercept)
-    intercept = np.exp(gam_model.coef_[-1])
-
-    intercept_adj_list = []
 
     # Initilise an empty dictionary for numerical variables
     num_rel_dict = {}
 
-    if base_pred is not None:
-        for k, v in num_feat_map.items():
-            if v == base_pred:
-                del num_feat_map[k]
-                break
+    for k, v in num_feat_map.items():
 
-    for i, v in num_feat_map.items():
-        banding = pd.read_excel(
-            numerical_banding,
-            sheet_name=v.replace("_level", ""),
-        )
-        index = list(range(1, len(banding) + 1))
-        z = feature_df.columns.tolist().index(
-            v
-        )  # the column index of the numerical variable
-        t = np.zeros((len(index), number_factors))
+        # Get the unique levels associated with a numerical variable
+        index = np.sort(X_train[v].unique())
+
+        assert (
+            np.unique(np.diff(index))[0] == 1 and len(np.unique(np.diff(index))) == 1
+        ), "There are probably missing levels in the numerical range. Please check!!"
+
+        # Initialise a 0-array as an input to calculate partial dependency
+        t = np.zeros((len(index), len(X_train.columns)))
+
+        # Get the column index of the numerical variable
+        z = X_train.columns.tolist().index(v)
+
+        # Populate the column related to the variable for which we seek partial dependency
         t[:, z] = index
-        # Need to make use of an internal function from PyGAM to get the partial dependence
-        modelmat = gam_model.terms.build_columns(t, term=i)
+
+        # Need to use an internal function from PyGAM to get the partial dependence
+        modelmat = gam_model.terms.build_columns(t, term=k)
         partial_dependence = np.exp(
-            gam_model._linear_predictor(modelmat=modelmat, term=i)
+            gam_model._linear_predictor(modelmat=modelmat, term=k)
         )
+
+        # Concatenate the feature values and PDs
         prediction = pd.DataFrame(zip(index, partial_dependence), columns=[v, "pred"])
 
-        # Get the min and max from feature_df - assuming this is the same as the training data
-        x_min = feature_df[v].min()
-        x_max = feature_df[v].max()
-
-        # Get the predictions of the x_min and x_max
-        y_min = prediction.loc[prediction[v] == x_min, "pred"].values[0]
-        y_max = prediction.loc[prediction[v] == x_max, "pred"].values[0]
-
-        # If the feature value is outside the range seen in the training data, then use the predictions of the x_min / x_max
-        prediction.loc[prediction[v] <= x_min, "pred"] = y_min
-        prediction.loc[prediction[v] >= x_max, "pred"] = y_max
-
-        # Adjust the relativities such that the weighted average level is 1
+        # Adjust the PDs such that its weighted average level is 1
         prediction["relativity"] = prediction["pred"].copy()
-        num_rel_dict[v] = prediction
-        num_rel_dict[v] = num_rel_dict[v].join(data_df.groupby(v)[[weight]].sum(), on=v)
-        num_rel_dict[v][weight] = num_rel_dict[v][weight].fillna(0)
-        num_rel_dict[v]["rel_weight"] = (
-            num_rel_dict[v]["relativity"] * num_rel_dict[v][weight]
+        prediction = prediction.join(
+            X_train.join(w_train).groupby(v)[[weight]].sum(), on=v
         )
-        avg_rel = num_rel_dict[v]["rel_weight"].sum() / num_rel_dict[v][weight].sum()
-        num_rel_dict[v]["relativity"] /= avg_rel
-        intercept_adj_list.append(avg_rel)
+        prediction["rel_weight"] = prediction["relativity"] * prediction[weight]
+        avg_rel = prediction["rel_weight"].sum() / prediction[weight].sum()
+        prediction["relativity"] /= avg_rel
 
-    # Initilise an empty dictionary for categorical variables
+        # Record the multiplier (this needs to be applied to intercept)
+        intercept_adj_list.append(avg_rel)
+        num_rel_dict[v] = prediction[[v, "relativity", weight]]
+    return (num_rel_dict, intercept_adj_list)
+
+
+def extract_gam_relativity_cat(
+    gam_model: GAM,
+    X_train: pd.DataFrame,
+    w_train: pd.Series,
+    cat_feat_map: dict[int, str],
+    weight: str,
+    cat_map_table: str,
+    intercept_adj_list: list[float] = [],
+) -> tuple[dict[str, pd.DataFrame], list[float]]:
+    """
+    Extract relativities for categorical features from a trained GAM model.
+
+    Args:
+        gam_model: Fitted PyGAM model.
+        X_train: Training feature dataframe.
+        w_train: Training weights series.
+        cat_feat_map: Dictionary mapping term indices to categorical feature names.
+        weight: Column name in the relativity DataFrames that contains the weights.
+        cat_map_table: Location of where the categorical-level-to-integer mapping spreadsheet for categorical variables is saved.
+        intecept_adj_list: A list to store the average relativity for each feature, which can be used to adjust the model intercept.
+
+    Returns:
+        Tuple containing:
+        - Dict mapping each feature name to a DataFrame with relativities
+        - List of intercept adjustments
+
+    Raises:
+        AssertionError: If there are missing levels in the numerical range of any feature.
+    """
+
+    # Get the mapping tables in the form of a dictionary
+    cat_map_dict = pd.read_excel(cat_map_table, sheet_name=None)
+
+    # Initilise an empty dictionary for numerical variables
     cat_rel_dict = {}
 
-    for i, v in cat_feat_map.items():
-        mapping = pd.read_excel(
-            categorical_banding, sheet_name=v.replace("_cat_level", "")
-        )
-        mapping["Categorical_Level"] = mapping["Categorical_Level"].astype(str)
-        mapping.sort_values("Integer_Value", inplace=True)
-        index = mapping["Integer_Value"]
+    for k, v in cat_feat_map.items():
+        # Define the clean variable name
+        v_clean = v.replace("_cat_level", "")
 
-        mapping = pd.read_excel(
-            categorical_banding, sheet_name=v.replace("_cat_level", "")
-        )
-        mapping["Categorical_Level"] = mapping["Categorical_Level"].astype(str)
-        mapping.sort_values("Integer_Value", inplace=True)
-        index = mapping["Integer_Value"]
-        z = feature_df.columns.tolist().index(v)
+        # Get the unique levels associated with a categorical variable
+        index = np.sort(X_train[v].unique())
 
-        unique_val_train = feature_df[v].unique()
+        assert (
+            np.unique(np.diff(index))[0] == 1 and len(np.unique(np.diff(index))) == 1
+        ), "There are probably missing levels in the categorical range. Please check!!"
 
-        # Any categorical level not in the training data needs to have the relativity of the most frequent level
-        index_train = np.where(
-            index.isin(unique_val_train), index, feature_df[v].mode().iloc[0]
-        )
-        len_index = len(index)
+        # Initialise a 0-array as an input to calculate partial dependency
+        t = np.zeros((len(index), len(X_train.columns)))
 
-        t = np.zeros((len_index, number_factors))
-        t[:, z] = index_train
-        modelmat = gam_model.terms.build_columns(t, term=i)
+        # Get the column index of the numerical variable
+        z = X_train.columns.tolist().index(v)
+
+        # Populate the column related to the variable for which we seek partial dependency
+        t[:, z] = index
+
+        # Need to use an internal function from PyGAM to get the partial dependence
+        modelmat = gam_model.terms.build_columns(t, term=k)
         partial_dependence = np.exp(
-            gam_model._linear_predictor(modelmat=modelmat, term=i)
+            gam_model._linear_predictor(modelmat=modelmat, term=k)
         )
-        pred = pd.DataFrame(zip(index, partial_dependence), columns=[v, "pred"])
 
-        pred["relativity"] = pred["pred"].copy()
-        cat_rel_dict[v] = pred
-        cat_rel_dict[v] = cat_rel_dict[v].join(data_df.groupby(v)[[weight]].sum(), on=v)
-        cat_rel_dict[v][weight] = cat_rel_dict[v][weight].fillna(0)
-        cat_rel_dict[v]["rel_weight"] = (
-            cat_rel_dict[v]["relativity"] * cat_rel_dict[v][weight]
+        # Concatenate the feature values and PDs
+        prediction = pd.DataFrame(zip(index, partial_dependence), columns=[v, "pred"])
+
+        # Adjust the PDs such that its weighted average level is 1
+        prediction["relativity"] = prediction["pred"].copy()
+        prediction = prediction.join(
+            X_train.join(w_train).groupby(v)[[weight]].sum(), on=v
         )
-        avg_rel = cat_rel_dict[v]["rel_weight"].sum() / cat_rel_dict[v][weight].sum()
-        cat_rel_dict[v]["relativity"] /= avg_rel
+        prediction["rel_weight"] = prediction["relativity"] * prediction[weight]
+        avg_rel = prediction["rel_weight"].sum() / prediction[weight].sum()
+        prediction["relativity"] /= avg_rel
+
+        # Get the categorical levels
+        table = cat_map_dict[v_clean]
+        prediction[v_clean] = prediction[v].map(
+            table.set_index("Integer_Value")["Categorical_Level"].to_dict()
+        )
+
+        # Record the multiplier (this needs to be applied to intercept)
+        intercept_adj_list.append(avg_rel)
+        cat_rel_dict[v] = prediction[[v, v_clean, "relativity", weight]]
+    return (cat_rel_dict, intercept_adj_list)
+
+
+def extract_gam_relativity_inter(
+    gam_model: GAM,
+    X_train: pd.DataFrame,
+    w_train: pd.Series,
+    inter_feat_map: dict[int, str],
+    weight: str,
+    cat_map_table: str,
+    intercept_adj_list: list[float] = [],
+) -> tuple[dict[str, pd.DataFrame], list[float]]:
+    """
+    Extract relativities for categorical features from a trained GAM model.
+
+    Args:
+        gam_model: Fitted PyGAM model.
+        X_train: Training feature dataframe.
+        w_train: Training weights series.
+        inter_feat_map: Dictionary mapping term indices to categorical feature names.
+        weight: Column name in the relativity DataFrames that contains the weights
+        cat_map_table: Location of where the categorical-level-to-integer mapping spreadsheet for categorical variables is saved.
+        intecept_adj_list: A list to store the average relativity for each feature, which can be used to adjust the model intercept.
+
+    Returns:
+        Tuple containing:
+        - Dict mapping each interaction name to a DataFrame with relativities
+        - List of intercept adjustments
+
+    Raises:
+        AssertionError: If there are missing levels in the numerical range of any feature.
+    """
+
+
+    inter_rel_dict = {}
+    vars_in_interaction = list(inter_feat_map.values())
+    vars_in_interaction = set(list(chain(*vars_in_interaction)))
+
+    # Get the mapping tables in the form of a dictionary
+    cat_map_dict = pd.read_excel(cat_map_table, sheet_name=None)
+
+    for k, v in inter_feat_map.items():
+
+        v1, v2 = v
+        interaction_name = v1 + " x " + v2
+
+        index1 = np.sort(X_train[v1].unique())
+        index2 = np.sort(X_train[v2].unique())
+        v1_clean = v1.replace("_cat_level", "")
+        v2_clean = v2.replace("_cat_level", "")
+
+        output = list(product(index1, index2))
+        output = np.array(sorted(output, key=lambda x: (x[0], x[1])))
+
+        # Initialise a 0-array as an input to calculate partial dependency
+        t = np.zeros((output.shape[0], len(X_train.columns)))
+        z1 = X_train.columns.tolist().index(v1)
+        z2 = X_train.columns.tolist().index(v2)
+
+        # Populate the column related to the variable for which we seek partial dependency
+        t[:, z1] = output[:, 0]
+        t[:, z2] = output[:, 1]
+
+        modelmat = gam_model.terms.build_columns(t, term=k)
+        partial_dependence = np.exp(gam_model._linear_predictor(modelmat=modelmat, term=k))
+
+        # Concatenate the feature values and PDs
+        prediction = pd.DataFrame(
+            np.hstack((output, partial_dependence.reshape(-1, 1))), columns=[v1, v2, "pred"]
+        )
+        # Adjust the PDs such that its weighted average level is 1
+        prediction["relativity"] = prediction["pred"].copy()
+        prediction = prediction.join(
+            X_train.join(w_train).groupby([v1, v2])[[weight]].sum(), on=[v1, v2]
+        )
+        prediction[weight] = prediction[weight].fillna(0)
+        prediction["rel_weight"] = prediction["relativity"] * prediction[weight]
+        avg_rel = prediction["rel_weight"].sum() / prediction[weight].sum()
+        prediction["relativity"] /= avg_rel
         intercept_adj_list.append(avg_rel)
 
-    if interact_term_map == None:
-        inter_rel_dict = None
-    else:
-        interaction_map1 = {k: sorted(l) for k, l in interact_term_map.items()}
-        assert len(set(interaction_map1.values())) == len(
-            interaction_map1
-        ), "Duplicated interaction terms found."
-
-        vars_in_interaction = list(interaction_map1.values())
-        vars_in_interaction = set(list(chain(*vars_in_interaction)))
-        full_vars = set(list(num_feat_map.values()) + list(cat_feat_map.values()))
-        assert (
-            len(vars_in_interaction - full_vars) == 0
-        ), "Some variables in the interaction terms not found in either numerical or categorical dictionary"
-
-        inter_rel_dict = {}
-        for i, interaction in interact_term_map.items():
-
-            v1, v2 = interaction
-            interaction_name = v1 + " x " + v2
-
-            if v1 in num_feat_map.values():
-                banding = pd.read_excel(
-                    numerical_banding,
-                    sheet_name=v1.replace("_level", ""),
-                )
-                index1 = list(range(1, len(banding) + 1))
-            else:
-                # Assume that any variable not in num_feat_map is in cat_feat_map
-                mapping = pd.read_excel(
-                    categorical_banding, sheet_name=v1.replace("_cat_level", "")
-                )
-                mapping["Categorical_Level"] = mapping["Categorical_Level"].astype(str)
-                mapping.sort_values("Integer_Value", inplace=True)
-                index1 = mapping["Integer_Value"]
-
-            if v2 in num_feat_map.values():
-                banding = pd.read_excel(
-                    numerical_banding,
-                    sheet_name=v2.replace("_level", ""),
-                )
-                index2 = list(range(1, len(banding) + 1))
-            else:
-                # Assume that any variable not in num_feat_map is in cat_feat_map
-                mapping = pd.read_excel(
-                    categorical_banding, sheet_name=v2.replace("_cat_level", "")
-                )
-                mapping["Categorical_Level"] = mapping["Categorical_Level"].astype(str)
-                mapping.sort_values("Integer_Value", inplace=True)
-                index2 = mapping["Integer_Value"]
-
-            output = list(product(index1, index2))
-            output_df = pd.DataFrame(output, columns=[1, 2])
-            output_df.sort_values([1, 2], inplace=True)
-
-            t = pd.DataFrame(np.zeros((len(output_df), number_factors)))
-            z1 = feature_df.columns.tolist().index(v1)
-            z2 = feature_df.columns.tolist().index(v2)
-
-            if v1 in num_feat_map.values():
-                x_min1 = feature_df[v1].min()
-                x_max1 = feature_df[v1].max()
-                output_df["1_train"] = output_df[1].clip(x_min1, x_max1)
-            else:
-                unique_val_train1 = feature_df[v1].unique()
-                output_df["1_train"] = np.where(
-                    output_df[1].isin(unique_val_train1),
-                    output_df[1],
-                    feature_df[v1].mode().iloc[0],
-                )
-
-            if v2 in num_feat_map.values():
-                x_min2 = feature_df[v2].min()
-                x_max2 = feature_df[v2].max()
-                output_df["2_train"] = output_df[2].clip(x_min2, x_max2)
-            else:
-                unique_val_train2 = feature_df[v2].unique()
-                output_df["2_train"] = np.where(
-                    output_df[2].isin(unique_val_train2),
-                    output_df[2],
-                    feature_df[v2].mode().iloc[0],
-                )
-
-            t[z1] = output_df["1_train"]
-            t[z2] = output_df["2_train"]
-
-            modelmat = gam_model.terms.build_columns(t.to_numpy(), term=i)
-            output_df["pred"] = np.exp(
-                gam_model._linear_predictor(modelmat=modelmat, term=i)
+        # Get the categorical levels
+        if v1_clean in cat_map_dict.keys(): 
+            table = cat_map_dict[v1_clean]
+            prediction[v1_clean] = prediction[v1].map(
+                table.set_index("Integer_Value")["Categorical_Level"].to_dict()
             )
-
-            output_df["relativity"] = output_df["pred"].copy()
-            output_df = output_df.join(
-                data_df.rename(columns={v1: 1, v2: 2}).groupby([1, 2])[[weight]].sum(),
-                on=[1, 2],
+        if v2_clean in cat_map_dict.keys(): 
+            table = cat_map_dict[v2_clean]
+            prediction[v2_clean] = prediction[v2].map(
+                table.set_index("Integer_Value")["Categorical_Level"].to_dict()
             )
-            output_df[weight] = output_df[weight].fillna(0)
-            output_df["rel_weight"] = output_df["relativity"] * output_df[weight]
-            avg_rel = output_df["rel_weight"].sum() / output_df[weight].sum()
-            output_df["relativity"] /= avg_rel
-            intercept_adj_list.append(avg_rel)
+        col_list = [v1, v2, "relativity", weight]
+        if v1_clean in cat_map_dict.keys(): 
+            col_list = col_list + [v1_clean]
+        if v2_clean in cat_map_dict.keys(): 
+            col_list = col_list + [v2_clean]
 
-            output_df.rename(columns={1: v1, 2: v2}, inplace=True)
-            output_df.drop(columns=["1_train", "2_train"], inplace=True)
+        inter_rel_dict[interaction_name] = prediction[col_list]
 
-            inter_rel_dict[interaction_name] = output_df
+    return (inter_rel_dict, intercept_adj_list)
 
-    intercept *= np.prod(intercept_adj_list) * base_adj
-    return (intercept, num_rel_dict, cat_rel_dict, inter_rel_dict)
+
