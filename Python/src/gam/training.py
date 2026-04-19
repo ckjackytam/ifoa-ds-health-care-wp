@@ -161,6 +161,149 @@ def create_term_structure(
     return (term_string, num_feat_map, cat_feat_map, interact_term_map)
 
 
+class OptunaGamObjective:
+    """
+    A custom objective class for Optuna optimization of Generalized Additive Models (GAMs).
+
+    This class encapsulates the objective function for Optuna to optimise GAM hyperparameters
+    using a train/validation split. It handles training of GAMs, prediction on the validation set,
+    and calculation of the Poisson deviance for model evaluation.
+
+    Methods:
+        __call__(trial): The objective function to be optimised by Optuna.
+    """
+
+
+    def __init__(
+        self,
+        term_string,
+        n_splines_range,
+        lam_num_range,
+        lam_cat_range,
+        X_train,
+        X_valid,
+        y_train,
+        y_valid,
+        w_train,
+        w_valid,
+        n_splines_inter_range=(4, 4),
+        lam_num_inter_range=(1, 1, False),
+        lam_cat_inter_range=(1, 1, False),
+    ):
+        """
+        Initialize the OptunaGamObjective.
+
+        Parameters:
+        -----------
+        term_string : str
+            The term structure string for the GAM (will be evaluated at runtime).
+        n_splines_range : tuple of (int, int)
+            Range for number of splines (min, max).
+        lam_num_range : tuple of (float, float, bool)
+            Range for numerical smoothing parameters (min, max, log_scale).
+        lam_cat_range : tuple of (float, float, bool)
+            Range for categorical L2 regularisation parameters (min, max, log_scale).
+        X_train : pd.DataFrame
+            Training feature DataFrame.
+        X_valid : pd.DataFrame
+            Validation feature DataFrame.
+        y_train : array-like
+            Training target values.
+        y_valid : array-like
+            Validation target values.
+        w_train : array-like
+            Training sample weights (exposures).
+        w_valid : array-like
+            Validation sample weights (exposures).
+        n_splines_inter_range : tuple of (int, int), optional
+            Range for number of splines in interaction terms (min, max).
+            Defaults to (4, 4) for single-factor models.
+        lam_num_inter_range : tuple of (float, float, bool), optional
+            Range for numerical interaction smoothing parameters (min, max, log_scale).
+            Defaults to (1, 1, False) for single-factor models.
+        lam_cat_inter_range : tuple of (float, float, bool), optional
+            Range for categorical interaction L2 regularisation parameters (min, max, log_scale).
+            Defaults to (1, 1, False) for single-factor models.
+        """
+        self.term_string = term_string
+        self.n_splines_range = n_splines_range
+        self.lam_num_range = lam_num_range
+        self.lam_cat_range = lam_cat_range
+        self.n_splines_inter_range = n_splines_inter_range
+        self.lam_num_inter_range = lam_num_inter_range
+        self.lam_cat_inter_range = lam_cat_inter_range
+        self.X_train = X_train
+        self.X_valid = X_valid
+        self.y_train = y_train
+        self.y_valid = y_valid
+        self.w_train = w_train
+        self.w_valid = w_valid
+
+    def __call__(self, trial):
+
+        n_splines = trial.suggest_int(
+            "n_splines", self.n_splines_range[0], self.n_splines_range[1]
+        )
+        lam_num = trial.suggest_float(
+            "lam_num",
+            self.lam_num_range[0],
+            self.lam_num_range[1],
+            log=self.lam_num_range[2],
+        )
+        lam_cat = trial.suggest_float(
+            "lam_cat",
+            self.lam_cat_range[0],
+            self.lam_cat_range[1],
+            log=self.lam_cat_range[2],
+        )
+        n_splines_inter = trial.suggest_int(
+            "n_splines_inter",
+            self.n_splines_inter_range[0],
+            self.n_splines_inter_range[1],
+        )
+        lam_num_inter = trial.suggest_float(
+            "lam_num_inter",
+            self.lam_num_inter_range[0],
+            self.lam_num_inter_range[1],
+            log=self.lam_num_inter_range[2],
+        )
+        lam_cat_inter = trial.suggest_float(
+            "lam_cat_inter",
+            self.lam_cat_inter_range[0],
+            self.lam_cat_inter_range[1],
+            log=self.lam_cat_inter_range[2],
+        )
+       
+
+        try:
+
+            gam_model = GAM(
+                eval(self.term_string),
+                distribution="poisson",
+                link="log",
+            ).fit(
+                self.X_train,
+                self.y_train,
+                weights=self.w_train,
+            )
+            # Perform out-of-fold model scoring
+            ypred_valid = pd.DataFrame(index=self.X_valid.index)
+
+            ypred_valid["ypred_0"] = gam_model.predict(self.X_valid)
+            ypred_valid["weight"] = self.w_valid
+            ypred_valid["ypred"] = ypred_valid["ypred_0"] * ypred_valid["weight"]
+            ypred_valid["claim_count"] = self.y_valid * self.w_valid
+
+            poisson_loss = total_poisson_dev(
+                ypred_valid["claim_count"], ypred_valid["ypred"]
+            )
+
+        except (np.linalg.LinAlgError, ValueError, FloatingPointError):
+            poisson_loss = 1e8
+
+        return poisson_loss
+
+
 class OptunaGamObjectiveCV:
     """
     A custom objective class for Optuna optimization of Generalized Additive Models (GAMs).
