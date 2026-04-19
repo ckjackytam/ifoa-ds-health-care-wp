@@ -68,13 +68,22 @@ The Society of Actuaries has a comprehensive open-source [ILEC mortality dataset
 
 **Note:** CMI case studies require CMI member data access. ILEC case studies use publicly available SOA data.
 
-## 6. Resources & References
+## 6. Data source
 
-**Framework and articles:**
-- [A Framework for DS Techniques in Health and Care](https://actuaries.org.uk/media/ppqhbjfp/a-framework-for-ds-technicques-to-hc-actuarial-20251003.pdf) (IFoA)
-- [A new pathway](https://www.theactuary.com/2025/07/02/new-pathway-framework-incorporating-data-science-health-and-care) - The Actuary article on CMI GAM study
-- [Hybrid modelling paper](https://actuaries.org.uk/media/xikgrpeg/bridging-transparency-and-predictive-power-integrating-explainable-ml-into-actuarial-modelling-fiona-fan-michiel-luteijn-jacky-tam.pdf) - IFoA Big Pitch 2026 presentation
-
-**Data sources:**
 - [SOA ILEC Mortality Dataset](https://www.soa.org/resources/research-reports/2024/ilec-mort-2012-19/) (open-source)
 - CMI Working Paper 162 (2022) - Term assurance experience 2016-2020 (CMI members only)
+
+## 7. Citation
+
+If you use this code or framework in your work, please cite:
+
+**Framework:**
+Luteijn, J.M. et al. (2026). *A Framework for Data Science Techniques in Health and Care*. Institute and Faculty of Actuaries. https://actuaries.org.uk/media/ppqhbjfp/a-framework-for-ds-technicques-to-hc-actuarial-20251003.pdf
+
+**GAM Study:**
+Tam, J., & Luteijn, J.M. (2025). "A new pathway: A framework for incorporating data science into health and care." *The Actuary*. https://www.theactuary.com/2025/07/02/new-pathway-framework-incorporating-data-science-health-and-care
+
+**Hybrid Modelling Study:**
+Fan, F., Luteijn, M., & Tam, J. (2026). "Bridging transparency and predictive power: Integrating explainable ML into actuarial modelling." Presented at IFoA Health & Care Big Pitch 2026. https://actuaries.org.uk/media/xikgrpeg/bridging-transparency-and-predictive-power-integrating-explainable-ml-into-actuarial-modelling-fiona-fan-michiel-luteijn-jacky-tam.pdf
+
+
